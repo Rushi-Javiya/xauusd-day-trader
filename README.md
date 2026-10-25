@@ -46,6 +46,24 @@ Safety properties, all enforced by deterministic code in [`agent/guard.py`](src/
 - **No chasing.** If the live price drifted more than half the stop distance since planning, nothing is sent.
 - **Orders are built from the approved plan only.** Volume, stop and take-profit come straight from it; the model never composes an order.
 
+### Where Claude is used (and where it is not)
+
+| Feature | Flag | What the model does | What it cannot do |
+|---|---|---|---|
+| Ticket rationale | `--llm` | Explains the proposed trade in 3-4 sentences from computed numbers, shown beside the ticket | Change size, stop, target or approval: the text is outside the plan hash |
+| Calendar research | `--llm-news` | Web-searches today's USD events (default: Sonnet) and adds them as blackout windows | Remove a blackout or approve anything: output is parsed into strictly validated `{time_ny, title}` events; malformed or out-of-range items are dropped, titles are length-capped. Labelled "not human-verified" |
+| Journal review | `gold-review` | Reviews `journal.csv` from precomputed statistics and flags small samples | Compute or invent statistics |
+
+If a model call fails, the run degrades safely: no rationale, or news falls back to `gold/news.json`. A failed research call never counts as a news check. Prompt-injection and "ignore the rules" cases are covered by tests with a scripted fake model, so CI never calls the API.
+
+Put your key in `.env` (git-ignored; see `.env.example`):
+
+```bash
+cp .env.example .env     # then set ANTHROPIC_API_KEY
+gold-agent --broker mcp --llm --llm-news
+gold-review
+```
+
 The broker is an interface. `McpBroker` talks to [`mcp-metatrader5-server`](https://github.com/Qoyyuum/mcp-metatrader5-server) over stdio via `langchain-mcp-adapters` (one persistent session, never calls `login`); `PaperBroker` replays bars so everything is testable without MT5.
 
 ```bash
@@ -121,9 +139,10 @@ MIT, see [LICENSE](LICENSE).
 
 - [x] Deterministic toolkit with tests and CI
 - [x] LangGraph agent with `interrupt()` approval, MCP broker adapter and deterministic guard layer
-- [ ] LLM nodes (Claude): news research, trade rationale and post-trade review (the LLM explains and critiques; it never sizes or sends orders)
+- [x] Claude nodes: news research, trade rationale, journal review (explain and critique only; never size or send orders)
+- [x] Adversarial tests: hostile model output cannot change an order or approve a ticket
 - [ ] Position management after entry (flat-by time, journal close from MT5 history)
-- [ ] Tracing (Langfuse / LangSmith) and an eval set checking the agent never bypasses the risk gate
+- [ ] Tracing (Langfuse / LangSmith) and a larger eval set across many replayed days
 - [ ] Journal dashboard
 - [x] Package refactor (`src/` layout, console commands)
 - [ ] Typed config (pydantic) and friendlier CLI errors
