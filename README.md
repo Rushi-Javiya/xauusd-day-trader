@@ -84,7 +84,7 @@ Stops and targets are in R (default 2R). Risk per trade defaults to 1% of balanc
 
 ## Quick start
 
-Requires Python 3.10+. The core toolkit uses only the standard library; the agent needs the `agent` extra and `fetch.py` needs the `MetaTrader5` package on Windows.
+Requires Python 3.11+ (LangGraph's `interrupt()` does not work in async nodes on 3.10). The core toolkit uses only the standard library; the agent needs the `agent` extra and `fetch.py` needs the `MetaTrader5` package on Windows.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate    # Windows: .venv\Scripts\activate
