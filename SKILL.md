@@ -16,7 +16,7 @@ Gold only. Not for stocks or other symbols. All times are **New York time** unle
 6. Do not chase stale signals (older than 2 bars). Do not move a stop further away after entry.
 
 ## Files
-`scripts/` holds launchers for the tools in `src/xauusd_trader/` (Python 3.9+, standard library only; `fetch.py` also needs `pip install MetaTrader5` on Windows). Work files live in `gold/` (override with env var `GOLD_DIR`): `config.json`, `data/M5.json`, `levels.json`, `entry.json`, `plan.json`, `risk.json`, `news.json`, `journal.csv`.
+`scripts/` holds launchers for the tools in `src/xauusd_trader/` (Python 3.10+, standard library only; `fetch.py` also needs `pip install MetaTrader5` on Windows). Work files live in `gold/` (override with env var `GOLD_DIR`): `config.json`, `data/M5.json`, `levels.json`, `entry.json`, `plan.json`, `risk.json`, `news.json`, `journal.csv`.
 
 If you can run commands (Claude Code, or a computer tool on the user's machine), run the scripts yourself. If not, give the user the exact command and ask them to paste the output. Never invent output.
 

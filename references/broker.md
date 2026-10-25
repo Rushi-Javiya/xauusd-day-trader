@@ -8,4 +8,5 @@ Preconditions: risk.json says PASS with the hash of the current plan.json and is
 4. Call `order_check` first (retcode 0 = OK). `type_filling` is 0 FOK, 1 IOC, 2 RETURN; the server auto-detects it when omitted, so only set it if the check complains. Only then `order_send`. Success retcodes are 10009 (done) and 10010 (partial). The app will ask for approval again; that is the second safety net.
 5. Report the result (ticket, fill price, retcode) and run `journal.py add --ticket N --fill PRICE`.
 6. Closing: `positions_get`, send the opposite market order referencing the position ticket, then `journal.py close`. At `flat_by` NY, remind the user to flatten everything. Never widen a stop.
+   Filling gotcha: the symbol's `filling_mode` is a bit flag (1 = FOK allowed, 2 = IOC allowed), while the order's `type_filling` is an enum (0 FOK, 1 IOC, 2 RETURN). Vantage XAUUSD reports `filling_mode` 2, so orders need `type_filling` 1 (IOC), not 2.
 7. Never loop orders, never place pending/averaging orders the plan did not define, never trade a second position because the first one is losing.

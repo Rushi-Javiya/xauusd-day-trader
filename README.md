@@ -28,6 +28,32 @@ flowchart LR
 
 All times are New York time. Broker server time is converted using configurable winter/summer offsets, with US DST handled in code.
 
+## LangGraph agent
+
+`gold-agent` runs the same workflow as a [LangGraph](https://langchain-ai.github.io/langgraph/) state machine. Each step is a node; any node can end the run with an outcome (`NO_SIGNAL`, `REFUSED`, `BLOCKED`, `PRICE_MOVED`, ...).
+
+```mermaid
+flowchart LR
+    P[preflight<br/>demo account, contract size, time mode] --> F[fetch_data] --> L[compute_levels] --> N[check_news] --> E[find_entry] --> M[make_plan] --> R[risk_check] --> H{{human_approval<br/>interrupt}} --> X[execute<br/>authorize, drift check, order_check, order_send] --> J[log_trade]
+```
+
+Safety properties, all enforced by deterministic code in [`agent/guard.py`](src/xauusd_trader/agent/guard.py) and covered by tests:
+
+- **Human in the loop.** `human_approval` uses LangGraph `interrupt()`. The run pauses on the exact ticket and resumes only with an approval carrying that ticket's hash.
+- **Demo only.** Preflight refuses any account whose `trade_mode` is not demo, and `execute` checks again right before sending.
+- **No unverified inputs.** Missing contract size, a broker lot-rule mismatch, a feed whose timestamps do not match the configured broker offset, stale bars, or a missing news file each stop the run.
+- **Verdict bound to the plan.** The risk verdict carries a hash of the plan and expires; a changed plan or an old verdict is refused.
+- **No chasing.** If the live price drifted more than half the stop distance since planning, nothing is sent.
+- **Orders are built from the approved plan only.** Volume, stop and take-profit come straight from it; the model never composes an order.
+
+The broker is an interface. `McpBroker` talks to [`mcp-metatrader5-server`](https://github.com/Qoyyuum/mcp-metatrader5-server) over stdio via `langchain-mcp-adapters` (one persistent session, never calls `login`); `PaperBroker` replays bars so everything is testable without MT5.
+
+```bash
+pip install -e ".[dev,agent]"
+gold-agent --broker paper --data gold/data/M5.json --now "2026-02-02 09:25" --setups orb   # replay
+gold-agent --broker mcp                                                                    # real MT5, demo account
+```
+
 ## Strategy (summary)
 
 | Setup | Idea |
@@ -40,10 +66,11 @@ Stops and targets are in R (default 2R). Risk per trade defaults to 1% of balanc
 
 ## Quick start
 
-Requires Python 3.9+. The core scripts use only the standard library; `fetch.py` additionally needs the `MetaTrader5` package on Windows.
+Requires Python 3.10+. The core toolkit uses only the standard library; the agent needs the `agent` extra and `fetch.py` needs the `MetaTrader5` package on Windows.
 
 ```bash
-pip install -e ".[dev]"          # add ".[dev,mt5]" on Windows to pull MT5 data
+python -m venv .venv && source .venv/bin/activate    # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"          # add ",agent" for the LangGraph agent, ",mt5" to pull MT5 data directly
 
 # try it without MT5 on synthetic data
 python scripts/make_demo_data.py 150
@@ -93,8 +120,9 @@ MIT, see [LICENSE](LICENSE).
 ## Roadmap
 
 - [x] Deterministic toolkit with tests and CI
-- [ ] LangGraph agent: `data -> levels -> news -> entry -> plan -> risk -> human approval -> order -> journal`, with `interrupt()` for approval and the MT5 MCP server as a tool via `langchain-mcp-adapters`
-- [ ] LLM-assisted news research, trade rationale and post-trade review
+- [x] LangGraph agent with `interrupt()` approval, MCP broker adapter and deterministic guard layer
+- [ ] LLM nodes (Claude): news research, trade rationale and post-trade review (the LLM explains and critiques; it never sizes or sends orders)
+- [ ] Position management after entry (flat-by time, journal close from MT5 history)
 - [ ] Tracing (Langfuse / LangSmith) and an eval set checking the agent never bypasses the risk gate
 - [ ] Journal dashboard
 - [x] Package refactor (`src/` layout, console commands)
