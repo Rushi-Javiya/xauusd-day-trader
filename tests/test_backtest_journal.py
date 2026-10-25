@@ -2,8 +2,8 @@ import datetime as dt
 
 import pytest
 
-import backtest
-import journal
+from xauusd_trader import backtest
+from xauusd_trader import journal
 
 D = dt.datetime
 DAY = D(2026, 1, 12)
@@ -66,7 +66,7 @@ def test_journal_stats():
 
 
 def test_journal_roundtrip(tmp_path, monkeypatch):
-    import common
+    from xauusd_trader import common
     monkeypatch.setattr(common, "WORKDIR", str(tmp_path))
     journal.write([{"ticket": "1", "date_ny": "2026-01-12", "side": "long"}])
     rows = journal.read()

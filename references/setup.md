@@ -16,4 +16,6 @@ Copy `config.example.json` to `gold/config.json` and edit. Fields that matter mo
 `python scripts/make_demo_data.py 150` makes synthetic data to practice the commands. It is random noise, not gold history.
 
 ## MCP connection check
-In Claude Desktop with the mt5 MCP server: `initialize`, `login` (user supplies credentials in their own session), `get_account_info`, `get_symbol_info` for the symbol. Confirm the account is a demo account before anything else.
+Server: [`mcp-metatrader5-server`](https://github.com/Qoyyuum/mcp-metatrader5-server) (`uvx --from mcp-metatrader5-server mt5mcp`). Call `initialize` to attach to the already logged-in MT5 terminal, then `get_account_info` and `get_symbol_info` for the symbol. Do **not** call `login` with a password in chat; log in inside the terminal itself. Confirm the account is a demo account (`trade_mode` 0) before anything else.
+
+Bars via `copy_rates_from_pos(symbol, timeframe, start_pos, count)`: timeframe is integer minutes (M5 = 5) and `time` comes back as ISO 8601 labelled UTC. MT5 stamps bars in broker server time, so the label may be misleading. Compare one returned bar against the same candle on the terminal chart before trusting session levels.

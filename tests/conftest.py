@@ -1,6 +1,6 @@
 import pytest
 
-from common import DEFAULTS
+from xauusd_trader.common import DEFAULTS
 
 
 @pytest.fixture

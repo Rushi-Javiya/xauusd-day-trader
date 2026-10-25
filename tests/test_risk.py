@@ -2,7 +2,7 @@ import datetime as dt
 
 import pytest
 
-import risk
+from xauusd_trader import risk
 
 D = dt.datetime
 NOW = D(2026, 1, 12, 9, 0)  # Monday, inside the entry window

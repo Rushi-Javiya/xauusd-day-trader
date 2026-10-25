@@ -1,6 +1,6 @@
 import datetime as dt
 
-import strategy
+from xauusd_trader import strategy
 
 D = dt.datetime
 DAY = D(2026, 1, 12)

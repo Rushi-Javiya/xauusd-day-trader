@@ -2,8 +2,8 @@ import datetime as dt
 
 import pytest
 
-import common
-from common import (atr, day_key, hhmm, load_bars, ny_to_utc, parse_time, server_to_utc, to_ny, us_dst)
+from xauusd_trader import common
+from xauusd_trader.common import (atr, day_key, hhmm, load_bars, ny_to_utc, parse_time, server_to_utc, to_ny, us_dst)
 
 D = dt.datetime
 

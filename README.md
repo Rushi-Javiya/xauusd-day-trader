@@ -77,11 +77,14 @@ The suite covers time and DST conversion, level and entry logic, stop and lot si
 ## Repository layout
 
 ```
-scripts/        toolkit (levels, entry, plan, risk, backtest, journal, fetch)
-references/     rules, risk, broker and backtest notes
-tests/          pytest suite
-SKILL.md        instructions that let an LLM client run the workflow
+src/xauusd_trader/   toolkit package (levels, entry, plan, risk, backtest, journal, fetch)
+scripts/             thin launchers so `python scripts/<tool>.py` works without installing
+references/          rules, risk, broker and backtest notes
+tests/               pytest suite
+SKILL.md             instructions that let an LLM client run the workflow
 ```
+
+After `pip install -e .` each tool is also a command: `gold-levels`, `gold-entry`, `gold-plan`, `gold-risk`, `gold-journal`, `gold-backtest`, `gold-fetch`.
 
 ## License
 
@@ -94,4 +97,5 @@ MIT, see [LICENSE](LICENSE).
 - [ ] LLM-assisted news research, trade rationale and post-trade review
 - [ ] Tracing (Langfuse / LangSmith) and an eval set checking the agent never bypasses the risk gate
 - [ ] Journal dashboard
-- [ ] Package refactor (`src/` layout, typed config)
+- [x] Package refactor (`src/` layout, console commands)
+- [ ] Typed config (pydantic) and friendlier CLI errors

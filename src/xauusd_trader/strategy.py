@@ -1,6 +1,6 @@
 """Entry rules for the New York session on M5 bars. Used by entry.py (live) and backtest.py (history).
 Setups: orb (opening-range breakout), retest (break then pullback), sweep (liquidity sweep reversal)."""
-from common import *
+from .common import *
 
 
 def _sig(setup, side, bar, tf, entry, stop_hint, lv, extra=None):

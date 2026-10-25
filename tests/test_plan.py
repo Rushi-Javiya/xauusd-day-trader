@@ -1,6 +1,6 @@
 import pytest
 
-import plan
+from xauusd_trader import plan
 
 
 def sig(side, entry=3350.0, **kw):

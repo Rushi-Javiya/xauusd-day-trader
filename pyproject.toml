@@ -1,18 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "xauusd-day-trader"
 version = "0.1.0"
 description = "XAUUSD New York-session trading toolkit for MetaTrader 5: levels, entries, sizing, risk gate, backtest, journal."
 readme = "README.md"
 requires-python = ">=3.9"
+license = { text = "MIT" }
 dependencies = []
 
 [project.optional-dependencies]
 mt5 = ["MetaTrader5; sys_platform == 'win32'"]
 dev = ["pytest>=8", "ruff>=0.6"]
 
+[project.scripts]
+gold-levels = "xauusd_trader.levels:main"
+gold-entry = "xauusd_trader.entry:main"
+gold-plan = "xauusd_trader.plan:main"
+gold-risk = "xauusd_trader.risk:main"
+gold-journal = "xauusd_trader.journal:main"
+gold-backtest = "xauusd_trader.backtest:main"
+gold-fetch = "xauusd_trader.fetch:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["scripts"]
+pythonpath = ["src"]
 
 [tool.ruff]
 line-length = 120
@@ -20,5 +37,5 @@ extend-exclude = ["gold"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W"]
-# scripts use `from common import *` by design
+# modules use `from .common import *` by design
 ignore = ["F403", "F405", "E401", "E501", "E701", "E702", "E731", "E741"]
