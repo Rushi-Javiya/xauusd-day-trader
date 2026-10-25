@@ -83,6 +83,10 @@ tests/          pytest suite
 SKILL.md        instructions that let an LLM client run the workflow
 ```
 
+## License
+
+MIT, see [LICENSE](LICENSE).
+
 ## Roadmap
 
 - [x] Deterministic toolkit with tests and CI
