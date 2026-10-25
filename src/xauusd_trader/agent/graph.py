@@ -1,7 +1,7 @@
 """LangGraph workflow for one trade attempt.
 
 preflight -> fetch_data -> compute_levels -> check_news -> find_entry -> make_plan -> risk_check
-          -> human_approval -> execute -> log_trade
+          -> explain_trade -> human_approval -> execute -> log_trade
 
 Every node either advances or sets `outcome` (a terminal result) and the graph ends. Sizing, the risk
 gate and order authorization are deterministic code; the only human step is `interrupt()` in `approval`.
@@ -21,6 +21,9 @@ from .. import risk
 from ..common import TD, bars_from_rows, day_key, group_days, iso, load_json, ny_to_utc, parse_iso
 from . import guard
 from .broker import Broker, BrokerError
+from .explain import explain_trade
+from .llm import LLM
+from .news import merge, research_news
 
 
 class TradeState(TypedDict, total=False):
@@ -30,6 +33,7 @@ class TradeState(TypedDict, total=False):
     news: list
     signal: dict
     plan: dict
+    rationale: str
     verdict: dict
     ticket: dict
     approval: dict
@@ -51,6 +55,8 @@ class Deps:
     news_loader: Callable[[], Optional[list]] = _file_news
     setups: Sequence[str] = ("orb", "retest", "sweep")
     stale_bars: int = 2
+    llm: Optional[LLM] = None          # explains the ticket; with llm_news also researches the calendar
+    llm_news: bool = False
     log_trades: bool = True
     extra: dict = field(default_factory=dict)
 
@@ -113,12 +119,21 @@ def build_nodes(d: Deps) -> Dict[str, Callable]:
 
     async def news(state: TradeState):
         events = d.news_loader()
+        notes: List[str] = []
+        if d.llm is not None and d.llm_news:
+            try:
+                found = await research_news(d.llm, d.clock())
+                events, added = merge(events or [], found) if events is not None else (found, len(found))
+                notes.append("LLM news research: %d event(s) found, %d not in news.json "
+                             "(LLM-sourced, not human-verified)" % (len(found), added))
+            except Exception as e:  # any LLM/parse failure falls back to the file, never to "no news"
+                notes.append("LLM news research failed (%s: %s); using news.json only" % (type(e).__name__, e))
         if events is None:
             if cfg.get("require_news_check", True):
                 return _end("NEWS_UNCHECKED", ["gold/news.json missing: add today's USD high-impact events "
-                                               "(use [] if there are none)"])
-            return {"news": [], "log": ["news NOT checked (require_news_check is off)"]}
-        return {"news": events, "log": ["%d news events loaded" % len(events)]}
+                                               "(use [] if there are none)"] + notes)
+            return {"news": [], "log": ["news NOT checked (require_news_check is off)"] + notes}
+        return {"news": events, "log": ["%d news events loaded" % len(events)] + notes}
 
     async def entry(state: TradeState):
         bars, lv = state["bars"], state["levels"]
@@ -154,10 +169,20 @@ def build_nodes(d: Deps) -> Dict[str, Callable]:
             return {"verdict": verdict, **_end("BLOCKED", why)}
         return {"verdict": verdict, "log": ["risk PASS"]}
 
+    async def explain(state: TradeState):
+        if d.llm is None:
+            return {}
+        try:
+            text = await explain_trade(d.llm, state, len(state.get("news") or []))
+        except Exception as e:  # explanation is optional; never blocks or alters the trade
+            return {"log": ["rationale unavailable (%s)" % type(e).__name__]}
+        return {"rationale": text, "log": ["rationale written"]}
+
     async def approval(state: TradeState):
         p = state["plan"]
         ticket = {
             "ticket_hash": guard.ticket_hash(p),
+            "rationale": state.get("rationale"),
             "summary": "%s %s %.2f lots @ ~%.2f | stop %.2f | take-profit %.2f (%.1fR) | max loss %.2f %s | flat by %s NY"
                        % (p["symbol"], p["side"].upper(), p["lots"], p["entry"], p["stop"], p["tp"],
                           p["target_r"], p["risk_acct"], p["account_ccy"], cfg["flat_by"]),
@@ -204,11 +229,11 @@ def build_nodes(d: Deps) -> Dict[str, Callable]:
     # node names must differ from state keys (LangGraph rule)
     return {"preflight": preflight, "fetch_data": fetch_data, "compute_levels": levels_node,
             "check_news": news, "find_entry": entry, "make_plan": plan_node, "risk_check": risk_node,
-            "human_approval": approval, "execute": execute, "log_trade": journal_node}
+            "explain_trade": explain, "human_approval": approval, "execute": execute, "log_trade": journal_node}
 
 
 CHAIN: List[str] = ["preflight", "fetch_data", "compute_levels", "check_news", "find_entry", "make_plan",
-                    "risk_check", "human_approval", "execute"]
+                    "risk_check", "explain_trade", "human_approval", "execute"]
 
 
 def build_graph(deps: Deps, checkpointer=None):

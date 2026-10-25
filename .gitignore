@@ -6,6 +6,7 @@ config.json
 !config.example.json
 .env
 .env.*
+!.env.example
 
 # Python
 __pycache__/

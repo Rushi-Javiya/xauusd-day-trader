@@ -15,7 +15,9 @@ from langgraph.types import Command
 
 from ..common import load_config, now_ny, parse_iso
 from .broker import McpBroker, PaperBroker
+from .explain import review_journal
 from .graph import Deps, build_graph
+from .llm import ClaudeLLM, load_env_file
 
 
 def _show(res: dict, skip: int = 0) -> int:
@@ -27,9 +29,16 @@ def _show(res: dict, skip: int = 0) -> int:
 
 
 async def run(args) -> int:
+    load_env_file()
     cfg = load_config()
     if args.no_news_check:
         cfg["require_news_check"] = False
+    llm = None
+    if args.llm or args.llm_news:
+        try:
+            llm = ClaudeLLM(cfg["llm_model"], cfg["llm_news_model"])
+        except RuntimeError as e:
+            print(e); return 2
     clock = now_ny
     async with contextlib.AsyncExitStack() as stack:
         if args.broker == "paper":
@@ -45,7 +54,8 @@ async def run(args) -> int:
             if args.auto_approve:
                 print("--auto-approve is only allowed with --broker paper"); return 2
             broker = await stack.enter_async_context(McpBroker(command=args.mcp_command, args=args.mcp_arg or None))
-        deps = Deps(broker=broker, cfg=cfg, clock=clock, setups=tuple(args.setups.split(",")))
+        deps = Deps(broker=broker, cfg=cfg, clock=clock, setups=tuple(args.setups.split(",")),
+                    llm=llm, llm_news=args.llm_news)
         graph = build_graph(deps)
         thread = {"configurable": {"thread_id": str(uuid.uuid4())}}
         res = await graph.ainvoke({"log": []}, thread)
@@ -53,6 +63,8 @@ async def run(args) -> int:
         if "__interrupt__" in res:
             ticket = res["__interrupt__"][0].value
             print("\nTICKET: " + ticket["summary"])
+            if ticket.get("rationale"):
+                print("WHY (written by the model, display only): " + ticket["rationale"])
             if args.auto_approve:
                 answer = "yes"
             else:
@@ -73,9 +85,25 @@ def main(argv=None) -> None:
     ap.add_argument("--setups", default="orb,retest,sweep")
     ap.add_argument("--auto-approve", action="store_true", help="paper broker only: approve without asking")
     ap.add_argument("--no-news-check", action="store_true", help="do not require gold/news.json (not recommended)")
+    ap.add_argument("--llm", action="store_true", help="Claude writes a short rationale shown with the ticket")
+    ap.add_argument("--llm-news", action="store_true",
+                    help="Claude researches today's USD events (web search) and adds them as blackouts")
     ap.add_argument("--mcp-command", default="uvx")
     ap.add_argument("--mcp-arg", action="append", help="repeatable; default: --from mcp-metatrader5-server mt5mcp")
     sys.exit(asyncio.run(run(ap.parse_args(argv))))
+
+
+def review_main(argv=None) -> None:
+    """gold-review: Claude reviews gold/journal.csv using the deterministic statistics as input."""
+    argparse.ArgumentParser(description=review_main.__doc__).parse_args(argv)
+    load_env_file()
+    cfg = load_config()
+    try:
+        llm = ClaudeLLM(cfg["llm_model"], cfg["llm_news_model"])
+    except RuntimeError as e:
+        print(e); sys.exit(2)
+    text = asyncio.run(review_journal(llm))
+    print(text if text else "No closed trades in the journal yet.")
 
 
 if __name__ == "__main__":
