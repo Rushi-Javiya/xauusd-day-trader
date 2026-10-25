@@ -1,64 +1,17 @@
 import asyncio
 import datetime as dt
-import json
 
 import pytest
 
 pytest.importorskip("langgraph")
 
+from helpers import find_signal_time, invoke, start  # noqa: E402
 from langgraph.types import Command  # noqa: E402
 
-from xauusd_trader import common, journal, levels, make_demo_data, strategy  # noqa: E402
-from xauusd_trader import plan as planmod  # noqa: E402
+from xauusd_trader import common, journal  # noqa: E402
 from xauusd_trader.agent import guard  # noqa: E402
 from xauusd_trader.agent.broker import BrokerError, PaperBroker  # noqa: E402
 from xauusd_trader.agent.graph import Deps, build_graph  # noqa: E402
-from xauusd_trader.common import bars_from_rows, group_days, parse_iso  # noqa: E402
-
-THREAD = {"configurable": {"thread_id": "t1"}}
-
-
-@pytest.fixture
-def rows(tmp_path, monkeypatch):
-    monkeypatch.setattr(common, "WORKDIR", str(tmp_path))
-    out = tmp_path / "M5.json"
-    make_demo_data.main(150, str(out))
-    return json.loads(out.read_text())
-
-
-def find_signal_time(rows, cfg):
-    """A deterministic day/time where the ORB setup fires early and yields a sizable plan."""
-    by_day = group_days(bars_from_rows(rows, cfg))
-    for date in sorted(by_day)[20:]:
-        if date.weekday() > 4 or len(by_day[date]) < 100:
-            continue
-        lv = levels.compute(by_day, date, cfg)
-        for s in strategy.find_signals(by_day[date], lv, cfg, ("orb",)):
-            p, err = planmod.price_plan(s, cfg)
-            if err or planmod.size_plan(p, cfg)[0] is None:
-                continue
-            t = parse_iso(s["time"])
-            if t.hour < 11:
-                return t
-    raise AssertionError("no usable signal in synthetic data")
-
-
-@pytest.fixture
-def scenario(rows, cfg):
-    cfg["contract_size_confirmed"] = True
-    now = find_signal_time(rows, cfg)
-    broker = PaperBroker(rows, cfg, as_of_ny=now)
-    deps = Deps(broker=broker, cfg=cfg, clock=lambda: now, news_loader=lambda: [], setups=("orb",))
-    return broker, deps, now
-
-
-def invoke(graph, payload):
-    return asyncio.run(graph.ainvoke(payload, THREAD))
-
-
-def start(graph):
-    return invoke(graph, {"log": []})
-
 
 def test_stops_at_approval_and_sends_nothing(scenario):
     broker, deps, _ = scenario
