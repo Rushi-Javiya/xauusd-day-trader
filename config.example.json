@@ -1,0 +1,18 @@
+{
+  "symbol": "XAUUSD",
+  "account_balance": 5000,
+  "account_ccy": "USD",
+  "account_ccy_per_usd": 1.0,
+  "max_loss_per_trade_pct": 1.0,
+  "daily_loss_limit_pct": 2.0,
+  "max_trades_per_day": 3,
+  "contract_size": 100,
+  "volume_min": 0.01,
+  "volume_step": 0.01,
+  "spread_usd": 0.35,
+  "broker_offset_winter": 2,
+  "broker_offset_summer": 3,
+  "range_start": "08:30",
+  "entry_cutoff": "11:30",
+  "flat_by": "16:30"
+}
