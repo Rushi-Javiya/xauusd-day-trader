@@ -1,0 +1,24 @@
+[project]
+name = "xauusd-day-trader"
+version = "0.1.0"
+description = "XAUUSD New York-session trading toolkit for MetaTrader 5: levels, entries, sizing, risk gate, backtest, journal."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+mt5 = ["MetaTrader5; sys_platform == 'win32'"]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["scripts"]
+
+[tool.ruff]
+line-length = 120
+extend-exclude = ["gold"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+# scripts use `from common import *` by design
+ignore = ["F403", "F405", "E401", "E501", "E701", "E702", "E731", "E741"]
