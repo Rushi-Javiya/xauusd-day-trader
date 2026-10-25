@@ -44,6 +44,7 @@ DEFAULTS = {
     "history_bars": 4500,            # M5 bars the agent pulls (~16 trading days, enough for 14d ATR)
     "max_price_drift_r": 0.5,        # refuse to send if live price moved more than this x stop distance
     "require_news_check": True,      # agent blocks when gold/news.json is missing
+    "mt5_path": "",                  # full path to terminal64.exe (needed by the MCP server's initialize)
     "llm_model": "claude-haiku-5-5",         # ticket rationale and journal review
     "llm_news_model": "claude-sonnet-5-5",   # calendar research with web search
 }

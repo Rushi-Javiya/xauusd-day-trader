@@ -53,7 +53,8 @@ async def run(args) -> int:
         else:
             if args.auto_approve:
                 print("--auto-approve is only allowed with --broker paper"); return 2
-            broker = await stack.enter_async_context(McpBroker(command=args.mcp_command, args=args.mcp_arg or None))
+            broker = await stack.enter_async_context(McpBroker(
+                command=args.mcp_command, args=args.mcp_arg or None, terminal_path=cfg.get("mt5_path") or None))
         deps = Deps(broker=broker, cfg=cfg, clock=clock, setups=tuple(args.setups.split(",")),
                     llm=llm, llm_news=args.llm_news)
         graph = build_graph(deps)
@@ -89,7 +90,7 @@ def main(argv=None) -> None:
     ap.add_argument("--llm-news", action="store_true",
                     help="Claude researches today's USD events (web search) and adds them as blackouts")
     ap.add_argument("--mcp-command", default="uvx")
-    ap.add_argument("--mcp-arg", action="append", help="repeatable; default: --from mcp-metatrader5-server mt5mcp")
+    ap.add_argument("--mcp-arg", action="append", help="repeatable; default: --from mcp-metatrader5-server --with pydantic<2.12 mt5mcp")
     sys.exit(asyncio.run(run(ap.parse_args(argv))))
 
 

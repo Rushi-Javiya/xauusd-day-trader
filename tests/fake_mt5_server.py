@@ -23,7 +23,8 @@ class OrderRequest(BaseModel):
 
 
 @mcp.tool()
-def initialize() -> bool:
+def initialize(path: str) -> bool:
+    # the real server requires the terminal64.exe path
     STATE["initialized"] = True
     return True
 

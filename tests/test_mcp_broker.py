@@ -13,7 +13,7 @@ SERVER = os.path.join(os.path.dirname(__file__), "fake_mt5_server.py")
 
 def run(coro_fn):
     async def main():
-        async with McpBroker(command=sys.executable, args=[SERVER]) as b:
+        async with McpBroker(command=sys.executable, args=[SERVER], terminal_path="C:/mt5/terminal64.exe") as b:
             return await coro_fn(b)
     return asyncio.run(main())
 
@@ -74,3 +74,14 @@ def test_unknown_tool_is_reported():
             await b._call("does_not_exist")
 
     run(go)
+
+
+def test_initialize_without_terminal_path_explains_what_to_set(monkeypatch):
+    monkeypatch.delenv("MT5_PATH", raising=False)
+
+    async def main():
+        async with McpBroker(command=sys.executable, args=[SERVER]) as b:
+            with pytest.raises(BrokerError, match="mt5_path"):
+                await b.initialize()
+
+    asyncio.run(main())

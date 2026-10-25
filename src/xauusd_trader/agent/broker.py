@@ -4,6 +4,7 @@ the real MT5 MCP server (McpBroker) or a deterministic replay (PaperBroker) in t
 Completed bars only: `rates` never returns the still-forming bar."""
 import datetime as dt
 import json
+import os
 from typing import Any, Dict, List, Optional, Protocol, Sequence
 
 from ..common import TD, bars_from_rows, iso, parse_time
@@ -50,10 +51,15 @@ class McpBroker:
     lives inside the server process, so a new process per call would lose it.
     Never calls `login`: attach to the terminal you are already logged in to."""
     replay = False
+    # The published server pulls an old `mcp` that breaks on pydantic >= 2.12 (ImportError: eval_type_backport),
+    # so the default command pins pydantic inside the server's own isolated environment.
+    DEFAULT_ARGS = ["--from", "mcp-metatrader5-server", "--with", "pydantic<2.12", "mt5mcp"]
 
-    def __init__(self, command: str = "uvx", args: Optional[Sequence[str]] = None, env: Optional[dict] = None):
+    def __init__(self, command: str = "uvx", args: Optional[Sequence[str]] = None, env: Optional[dict] = None,
+                 terminal_path: Optional[str] = None):
         self.command = command
-        self.args = list(args) if args is not None else ["--from", "mcp-metatrader5-server", "mt5mcp"]
+        self.args = list(args) if args is not None else list(self.DEFAULT_ARGS)
+        self.terminal_path = terminal_path or os.environ.get("MT5_PATH") or None
         self.env = env
         self._cm = None
         self._session = None
@@ -90,6 +96,13 @@ class McpBroker:
         return {"request": request} if "request" in props else dict(request)
 
     async def initialize(self) -> bool:
+        """Attach to the running, already logged-in terminal. The real server requires the terminal64.exe path."""
+        props = self._schemas.get("initialize", {}).get("properties", {})
+        if "path" in props:
+            if not self.terminal_path:
+                raise BrokerError("the MT5 server needs the terminal path: set mt5_path in gold/config.json "
+                                  "(e.g. C:\\Program Files\\MetaTrader 5\\terminal64.exe) or the MT5_PATH variable")
+            return bool(await self._call("initialize", {"path": self.terminal_path}))
         return bool(await self._call("initialize"))
 
     async def account_info(self):
