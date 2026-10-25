@@ -33,6 +33,17 @@ def fnum(x, d=0.0):
         return d
 
 
+def add_trade(plan, ticket, now, fill=None, note=""):
+    """Append an open trade (from a plan dict) to the journal and return the new row."""
+    rows = read()
+    row = {"ticket": str(ticket), "date_ny": str(now.date()), "open_ny": iso(now), "side": plan["side"],
+           "setup": plan["setup"], "lots": plan["lots"], "entry": fill or plan["entry"], "stop": plan["stop"],
+           "tp": plan["tp"], "risk_acct": plan["risk_acct"], "note": note}
+    rows.append(row)
+    write(rows)
+    return row
+
+
 def stats(rows):
     cl = [r for r in rows if r.get("exit") not in ("", None)]
     if not cl:
@@ -70,11 +81,8 @@ def main():
         p = load_json("plan.json")
         if not p or not a.ticket:
             print("need gold/plan.json and --ticket"); return
-        n = now_ny()
-        rows.append({"ticket": a.ticket, "date_ny": str(n.date()), "open_ny": iso(n), "side": p["side"],
-                     "setup": p["setup"], "lots": p["lots"], "entry": a.fill or p["entry"], "stop": p["stop"],
-                     "tp": p["tp"], "risk_acct": p["risk_acct"], "note": a.note})
-        write(rows); print("logged ticket", a.ticket)
+        add_trade(p, a.ticket, now_ny(), a.fill, a.note)
+        print("logged ticket", a.ticket)
     elif a.cmd == "close":
         r = next((x for x in rows if x["ticket"] == a.ticket and x["exit"] == ""), None)
         if not r:

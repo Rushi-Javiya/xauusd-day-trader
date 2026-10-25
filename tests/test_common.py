@@ -3,7 +3,7 @@ import datetime as dt
 import pytest
 
 from xauusd_trader import common
-from xauusd_trader.common import (atr, day_key, hhmm, load_bars, ny_to_utc, parse_time, server_to_utc, to_ny, us_dst)
+from xauusd_trader.common import (atr, bars_from_rows, day_key, hhmm, load_bars, ny_to_utc, parse_time, server_to_utc, to_ny, us_dst)
 
 D = dt.datetime
 
@@ -47,6 +47,18 @@ def test_parse_time_formats():
     assert parse_time("2026-01-12 08:30:00") == D(2026, 1, 12, 8, 30)
     with pytest.raises(ValueError):
         parse_time("not a time")
+
+
+def test_parse_time_iso_ignores_tz_label():
+    for s in ("2026-01-12T15:30:00+00:00", "2026-01-12T15:30:00Z", "2026-01-12T15:30:00"):
+        assert parse_time(s) == D(2026, 1, 12, 15, 30)
+
+
+def test_bars_from_rows_server_vs_utc_mode(cfg):
+    rows = [{"time": "2026-01-12T15:30:00+00:00", "open": 1, "high": 2, "low": 0, "close": 1}]
+    assert bars_from_rows(rows, cfg)[0]["t"] == D(2026, 1, 12, 8, 30)           # stamp = server time (UTC+2)
+    cfg["bar_time_mode"] = "utc"
+    assert bars_from_rows(rows, cfg)[0]["t"] == D(2026, 1, 12, 10, 30)          # stamp = true UTC
 
 
 def test_atr_simple():

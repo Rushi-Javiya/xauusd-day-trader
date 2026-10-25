@@ -48,6 +48,11 @@ def evaluate(plan, cfg, n, rows, news):
     return why
 
 
+def make_verdict(plan, cfg, n, why):
+    return {"verdict": "BLOCK" if why else "PASS", "reasons": list(why), "plan_hash": plan_hash(plan),
+            "checked_ny": iso(n), "valid_min": cfg["verdict_valid_min"]}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--now")
@@ -60,8 +65,7 @@ def main():
     why = evaluate(plan, cfg, n, journal.read(), load_json("news.json", []))
     if load_json("news.json") is None:
         print("warning: no gold/news.json, so news was NOT checked. Add today's USD events before trusting PASS.")
-    verdict = {"verdict": "BLOCK" if why else "PASS", "reasons": why, "plan_hash": plan_hash(plan),
-               "checked_ny": iso(n), "valid_min": cfg["verdict_valid_min"]}
+    verdict = make_verdict(plan, cfg, n, why)
     save_json("risk.json", verdict)
     if why:
         print("BLOCK"); [print("  - " + w) for w in why]

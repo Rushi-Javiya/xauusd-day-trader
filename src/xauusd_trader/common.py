@@ -39,6 +39,11 @@ DEFAULTS = {
     "news_before_min": 10,
     "news_after_min": 10,
     "verdict_valid_min": 10,
+    "contract_size_confirmed": False,  # agent refuses to size trades until you confirm contract_size
+    "bar_time_mode": "server",       # "server": bar stamps are broker server time; "utc": already true UTC
+    "history_bars": 4500,            # M5 bars the agent pulls (~16 trading days, enough for 14d ATR)
+    "max_price_drift_r": 0.5,        # refuse to send if live price moved more than this x stop distance
+    "require_news_check": True,      # agent blocks when gold/news.json is missing
 }
 
 
@@ -107,6 +112,13 @@ def parse_time(v):
     if isinstance(v, (int, float)):
         return dt.datetime(1970, 1, 1) + TD(seconds=float(v))
     s = str(v).strip()
+    if "T" in s and len(s) > 10:
+        # ISO 8601 (e.g. from the MCP server). The tz label is ignored on purpose:
+        # MT5 stamps bars in broker server time whatever the label says; see bar_time_mode.
+        try:
+            return dt.datetime.fromisoformat(s.replace("Z", "+00:00")).replace(tzinfo=None)
+        except ValueError:
+            pass
     if " " not in s and "T" not in s and s.replace(".", "", 1).isdigit() and len(s) >= 9:
         return dt.datetime(1970, 1, 1) + TD(seconds=float(s))
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y.%m.%d %H:%M:%S",
@@ -149,6 +161,12 @@ def load_bars(file, cfg):
         else:
             data = json.load(f)
             rows = data["bars"] if isinstance(data, dict) else data
+    return bars_from_rows(rows, cfg)
+
+
+def bars_from_rows(rows, cfg):
+    """Rows of dicts (time, open, high, low, close) -> bars with New York time.
+    cfg["bar_time_mode"]: "server" converts from broker server time, "utc" treats stamps as true UTC."""
     out = []
     for r in rows:
         r = {k.strip().strip("<>").lower(): v for k, v in r.items()}
@@ -156,8 +174,8 @@ def load_bars(file, cfg):
             t = parse_time(str(r["date"]) + " " + str(r["time"]))
         else:
             t = parse_time(r["time"])
-        ny = to_ny(server_to_utc(t, cfg))
-        out.append({"t": ny, "o": float(r["open"]), "h": float(r["high"]),
+        utc = t if cfg.get("bar_time_mode") == "utc" else server_to_utc(t, cfg)
+        out.append({"t": to_ny(utc), "o": float(r["open"]), "h": float(r["high"]),
                     "l": float(r["low"]), "c": float(r["close"])})
     out.sort(key=lambda b: b["t"])
     return out
