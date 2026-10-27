@@ -6,7 +6,8 @@ import pytest
 
 pytest.importorskip("langchain_mcp_adapters")
 
-from xauusd_trader.agent.broker import BrokerError, McpBroker  # noqa: E402
+from xauusd_trader.agent import broker as broker_mod  # noqa: E402
+from xauusd_trader.agent.broker import BrokerError, McpBroker, resolve_command  # noqa: E402
 
 SERVER = os.path.join(os.path.dirname(__file__), "fake_mt5_server.py")
 
@@ -85,3 +86,27 @@ def test_initialize_without_terminal_path_explains_what_to_set(monkeypatch):
                 await b.initialize()
 
     asyncio.run(main())
+
+def test_resolve_command_finds_uv_in_its_usual_folder_when_path_is_incomplete(tmp_path, monkeypatch):
+    folder = tmp_path / ".local" / "bin"
+    folder.mkdir(parents=True)
+    (folder / "uvx.exe").write_text("")
+    monkeypatch.setattr(broker_mod.shutil, "which", lambda name: None)
+    monkeypatch.setattr(broker_mod.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    assert resolve_command("uvx") == str(folder / "uvx.exe")
+
+
+def test_resolve_command_prefers_path_and_keeps_explicit_paths(monkeypatch):
+    monkeypatch.setattr(broker_mod.shutil, "which", lambda name: "C:/tools/uvx.exe")
+    assert resolve_command("uvx") == "C:/tools/uvx.exe"
+    assert resolve_command("D:/x/uvx.exe") == "D:/x/uvx.exe"
+
+
+def test_unknown_command_gives_a_readable_error_not_a_traceback(monkeypatch):
+    async def main():
+        async with McpBroker(command="definitely-not-a-real-command-xyz", args=[]):
+            pass
+
+    with pytest.raises(BrokerError, match="was not found"):
+        asyncio.run(main())

@@ -5,6 +5,8 @@ Completed bars only: `rates` never returns the still-forming bar."""
 import datetime as dt
 import json
 import os
+import shutil
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol, Sequence
 
 from ..common import TD, bars_from_rows, iso, parse_time
@@ -27,6 +29,30 @@ class Broker(Protocol):
 
 
 # ---- MCP -------------------------------------------------------------------
+def resolve_command(command: str) -> str:
+    """Find an executable even when PATH is incomplete (double-clicked .bat files and plain cmd windows do not
+    get the PATH entries a PowerShell profile adds). Falls back to the usual install folders of uv."""
+    if os.path.dirname(command):
+        return command
+    found = shutil.which(command)
+    if found:
+        return found
+    home = Path.home()
+    folders = [home / ".local" / "bin", home / ".cargo" / "bin"]
+    if os.environ.get("LOCALAPPDATA"):
+        folders.append(Path(os.environ["LOCALAPPDATA"]) / "uv")
+    for folder in folders:
+        for name in (command + ".exe", command):
+            if (folder / name).is_file():
+                return str(folder / name)
+    return command
+
+
+def _leaf_errors(exc: BaseException) -> List[BaseException]:
+    subs = getattr(exc, "exceptions", None)
+    return [leaf for e in subs for leaf in _leaf_errors(e)] if subs else [exc]
+
+
 def parse_tool_result(res) -> Any:
     """CallToolResult -> python object. Handles structuredContent and JSON text blocks."""
     texts = [c.text for c in (res.content or []) if getattr(c, "type", "") == "text"]
@@ -57,7 +83,7 @@ class McpBroker:
 
     def __init__(self, command: str = "uvx", args: Optional[Sequence[str]] = None, env: Optional[dict] = None,
                  terminal_path: Optional[str] = None):
-        self.command = command
+        self.command = resolve_command(command)
         self.args = list(args) if args is not None else list(self.DEFAULT_ARGS)
         self.terminal_path = terminal_path or os.environ.get("MT5_PATH") or None
         self.env = env
@@ -72,8 +98,16 @@ class McpBroker:
             conn["env"] = self.env
         self._client = MultiServerMCPClient({"mt5": conn})
         self._cm = self._client.session("mt5")
-        self._session = await self._cm.__aenter__()
-        listed = await self._session.list_tools()
+        try:
+            self._session = await self._cm.__aenter__()
+            listed = await self._session.list_tools()
+        except Exception as e:
+            leaf = _leaf_errors(e)[-1]
+            if isinstance(leaf, FileNotFoundError):
+                raise BrokerError("could not start the MT5 server: %r was not found. Install uv "
+                                  "(https://docs.astral.sh/uv/) or pass --mcp-command with the full path." % self.command)
+            raise BrokerError("could not start the MT5 server (%s: %s). Is MT5 installed, and does "
+                              "`%s %s` run in a terminal?" % (type(leaf).__name__, leaf, self.command, " ".join(self.args)))
         self._schemas = {t.name: (t.inputSchema or {}) for t in listed.tools}
         return self
 

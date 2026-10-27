@@ -18,7 +18,7 @@ import uuid
 from langgraph.types import Command
 
 from ..common import TD, hhmm, load_config, now_ny, ny_to_utc, parse_iso
-from .broker import McpBroker, PaperBroker
+from .broker import BrokerError, McpBroker, PaperBroker
 from .explain import review_journal
 from .graph import Deps, build_graph
 from .llm import ClaudeLLM, load_env_file
@@ -240,6 +240,9 @@ def main(argv=None) -> None:
     except KeyboardInterrupt:
         print("\nStopped. Nothing was sent.")
         sys.exit(130)
+    except BrokerError as e:
+        print("\nERROR: %s" % e)
+        sys.exit(1)
 
 def review_main(argv=None) -> None:
     """gold-review: Claude reviews gold/journal.csv using the deterministic statistics as input."""
