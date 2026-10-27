@@ -66,7 +66,15 @@ gold-review
 
 The broker is an interface. `McpBroker` talks to [`mcp-metatrader5-server`](https://github.com/Qoyyuum/mcp-metatrader5-server) over stdio via `langchain-mcp-adapters` (one persistent session, never calls `login`); `PaperBroker` replays bars so everything is testable without MT5.
 
-Daily use on Windows: double-click `trade.bat` (or run it from any folder). It starts the agent against the MT5 demo account with `--llm --llm-news --watch`: it re-checks after every 5-minute bar, shows a ticket when a valid setup appears, and stops at the entry cutoff. Ctrl+C stops it; nothing is sent without typing `yes`.
+Daily use on Windows: double-click `trade.bat` (or run it from any folder). It starts the agent against the MT5 demo account with `--llm --llm-news --always-on` and then runs by itself:
+
+- sleeps outside the session and over weekends, and wakes 10 minutes before the opening range each weekday
+- re-checks after every 5-minute bar until the entry cutoff
+- beeps and shows a ticket when a valid setup appears; nothing is sent without typing `yes` (a late `yes` is refused: the risk verdict expires after 10 minutes and the price-drift check runs again)
+- one ticket per day (placed, rejected or refused), then waits for the next session
+- retries connection errors; stops on config or safety problems (non-demo account, unknown contract size) or after 5 errors in a row
+
+Keep the window open, MT5 logged in and the PC awake. `--watch` does the same for a single session and then exits.
 
 ```bash
 pip install -e ".[dev,agent]"

@@ -6,7 +6,7 @@ pytest.importorskip("langgraph")
 
 from helpers import start  # noqa: E402
 
-from xauusd_trader.agent.cli import retryable, seconds_to_next_bar, window_end  # noqa: E402
+from xauusd_trader.agent.cli import classify, next_wake, retryable, seconds_to_next_bar, window_end  # noqa: E402
 from xauusd_trader.agent.graph import build_graph  # noqa: E402
 from xauusd_trader.agent.llm import ScriptedLLM  # noqa: E402
 
@@ -60,3 +60,60 @@ def test_news_research_is_cached_across_watch_iterations(scenario):
     searches = [c for c in deps.llm.calls if c["web_search"]]
     assert len(searches) == 1
     assert any("cached" in line for line in second["log"]) and not any("cached" in line for line in first["log"])
+
+
+# ---- always-on scheduling --------------------------------------------------
+MON, FRI = D(2026, 1, 12), D(2026, 1, 16)     # a Monday and the Friday of the same week
+
+
+def at(day, hh, mm=0):
+    return day.replace(hour=hh, minute=mm)
+
+
+def test_next_wake_before_the_session_is_ten_minutes_before_the_range(cfg):
+    assert next_wake(at(MON, 0, 45), cfg) == at(MON, 8, 20)
+
+
+def test_next_wake_during_the_session_is_now(cfg):
+    assert next_wake(at(MON, 9, 7), cfg) == at(MON, 9, 7)
+    assert next_wake(at(MON, 8, 20), cfg) == at(MON, 8, 20)
+
+
+def test_next_wake_after_the_cutoff_is_tomorrow(cfg):
+    assert next_wake(at(MON, 11, 30), cfg) == at(D(2026, 1, 13), 8, 20)
+    assert next_wake(at(MON, 20, 0), cfg) == at(D(2026, 1, 13), 8, 20)
+
+
+def test_next_wake_skips_the_weekend(cfg):
+    assert next_wake(at(FRI, 15, 0), cfg) == at(D(2026, 1, 19), 8, 20)            # Friday afternoon -> Monday
+    assert next_wake(at(D(2026, 1, 17), 12, 0), cfg) == at(D(2026, 1, 19), 8, 20)  # Saturday
+    assert next_wake(at(D(2026, 1, 18), 23, 0), cfg) == at(D(2026, 1, 19), 8, 20)  # Sunday night
+
+
+def test_next_wake_after_the_days_ticket_waits_for_tomorrow(cfg):
+    assert next_wake(at(MON, 9, 7), cfg, done_today=True) == at(D(2026, 1, 13), 8, 20)
+    assert next_wake(at(FRI, 9, 7), cfg, done_today=True) == at(D(2026, 1, 19), 8, 20)
+
+
+def test_next_wake_follows_custom_session_times(cfg):
+    cfg.update(range_start="03:00", entry_cutoff="06:30")
+    assert next_wake(at(MON, 1, 0), cfg) == at(MON, 2, 50)
+    assert next_wake(at(MON, 7, 0), cfg) == at(D(2026, 1, 13), 2, 50)
+
+
+def test_classify_after_a_finished_attempt(cfg):
+    assert classify(res("WAITING"), EARLY, cfg) == "RETRY"
+    assert classify(res("ORDER_PLACED"), EARLY, cfg) == "DAY_DONE"
+    assert classify(res("REJECTED"), EARLY, cfg) == "DAY_DONE"
+    assert classify(res("REFUSED", "stop too tight"), EARLY, cfg) == "DAY_DONE"
+    assert classify(res("BLOCKED", "already 3 trades today (max 3)"), EARLY, cfg) == "DAY_DONE"
+    assert classify(res("NO_SIGNAL"), LATE, cfg) == "DAY_DONE"                    # cutoff passed: the day is over
+
+
+def test_classify_config_and_safety_problems_stop_the_loop(cfg):
+    assert classify(res("PREFLIGHT_FAILED", "account is not a demo account"), EARLY, cfg) == "FATAL"
+    assert classify(res("PREFLIGHT_FAILED", "broker did not report contract size"), EARLY, cfg) == "FATAL"
+
+
+def test_classify_terminal_not_ready_is_transient(cfg):
+    assert classify(res("PREFLIGHT_FAILED", "MT5 initialize failed; is the terminal open?"), EARLY, cfg) == "BROKER_DOWN"

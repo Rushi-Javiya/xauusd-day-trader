@@ -3,6 +3,7 @@
   gold-agent --broker paper --data gold/data/M5.json --now "2026-03-10 08:55" [--auto-approve]
   gold-agent --broker mcp                      # real MT5 MCP server, demo account only: one check
   gold-agent --broker mcp --watch              # re-check after every bar until a ticket or the cutoff
+  gold-agent --broker mcp --always-on          # same, but every weekday by itself, until Ctrl+C
 
 You are shown the exact ticket and must type `yes`. Anything else sends nothing."""
 import argparse
@@ -16,7 +17,7 @@ import uuid
 
 from langgraph.types import Command
 
-from ..common import TD, hhmm, load_config, now_ny, parse_iso
+from ..common import TD, hhmm, load_config, now_ny, ny_to_utc, parse_iso
 from .broker import McpBroker, PaperBroker
 from .explain import review_journal
 from .graph import Deps, build_graph
@@ -59,6 +60,83 @@ def retryable(res: dict, now: dt.datetime, cfg: dict) -> bool:
     return False
 
 
+WAKE_EARLY_MIN = 10        # always-on wakes this long before the opening range to catch setup problems early
+
+
+def next_wake(now: dt.datetime, cfg: dict, done_today: bool = False) -> dt.datetime:
+    """When should the always-on loop next be active? Returns `now` if a session is open right now.
+    Sessions run on weekdays from (range_start - WAKE_EARLY_MIN) to entry_cutoff, New York time."""
+    day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    for i in range(9):
+        d = day + TD(days=i)
+        if d.weekday() > 4 or (i == 0 and done_today):
+            continue
+        wake = d + TD(minutes=hhmm(cfg["range_start"]) - WAKE_EARLY_MIN)
+        end = d + TD(minutes=hhmm(cfg["entry_cutoff"]))
+        if now < end:
+            return max(wake, now)
+    raise RuntimeError("no session found")
+
+
+def classify(res: dict, now: dt.datetime, cfg: dict) -> str:
+    """What the always-on loop does after a finished attempt:
+    RETRY (next bar), DAY_DONE (wait for the next session), BROKER_DOWN (transient, retry), FATAL (stop)."""
+    if retryable(res, now, cfg):
+        return "RETRY"
+    if res.get("outcome") == "PREFLIGHT_FAILED":
+        if any("initialize failed" in r for r in res.get("reasons") or []):
+            return "BROKER_DOWN"
+        return "FATAL"
+    return "DAY_DONE"
+
+
+def _local(ny: dt.datetime) -> str:
+    utc = ny_to_utc(ny).replace(tzinfo=dt.timezone.utc)
+    return utc.astimezone().strftime("%a %H:%M local")
+
+
+async def always_on(deps: Deps, args) -> int:
+    cfg, done_day, errors, announced = deps.cfg, None, 0, None
+    print("Always-on: New York session %s-%s NY each weekday, checking after every %d-minute bar.\n"
+          "One ticket per day. Keep this PC awake and MT5 open. Ctrl+C stops; nothing is sent without 'yes'." % (
+              cfg["range_start"], cfg["entry_cutoff"], cfg["tf_minutes"]))
+    while True:
+        now = deps.clock()
+        wake = next_wake(now, cfg, done_day == now.date())
+        if wake > now:
+            if announced != wake:
+                print("[%s NY] Sleeping until %s NY (%s)" % (now.strftime("%a %H:%M"), wake.strftime("%a %H:%M"),
+                                                             _local(wake)))
+                announced = wake
+            await asyncio.sleep(min((wake - now).total_seconds(), 3600))   # re-check hourly: PC sleep, clock changes
+            continue
+        try:
+            res, done = await attempt(deps, args, True)
+            errors = 0
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            raise
+        except Exception as e:
+            errors += 1
+            print("[%s NY] error (%d/5): %s: %s" % (now.strftime("%H:%M"), errors, type(e).__name__, e))
+            if errors >= 5:
+                print("Too many errors in a row; stopping. Check MT5 is open and logged in, then start again.")
+                return 1
+            await asyncio.sleep(seconds_to_next_bar(time.time(), cfg["tf_minutes"]))
+            continue
+        now = deps.clock()
+        what = "RETRY" if not done else classify(res, now, cfg)
+        if what == "FATAL":
+            return 1
+        if what == "DAY_DONE":
+            done_day = now.date()
+            print("[%s NY] Done for today (%s). Waiting for the next session." % (now.strftime("%H:%M"),
+                                                                                  res.get("outcome")))
+            continue
+        why = "; ".join(res.get("reasons") or [])
+        print("[%s NY] %s%s" % (now.strftime("%H:%M"), res.get("outcome"), " - " + why if why else ""))
+        await asyncio.sleep(seconds_to_next_bar(time.time(), cfg["tf_minutes"]))
+
+
 def seconds_to_next_bar(epoch: float, tf_min: int, grace: int = 15) -> float:
     """Seconds until the next bar boundary plus a grace period so the broker has closed the bar."""
     step = tf_min * 60
@@ -78,7 +156,7 @@ async def attempt(deps: Deps, args, watch: bool):
         return res, True
     shown = _show(res)
     ticket = res["__interrupt__"][0].value
-    print("\nTICKET: " + ticket["summary"])
+    print("\a\nTICKET: " + ticket["summary"])
     if ticket.get("rationale"):
         print("WHY (written by the model, display only): " + ticket["rationale"])
     if args.auto_approve:
@@ -97,8 +175,8 @@ async def run(args) -> int:
     cfg = load_config()
     if args.no_news_check:
         cfg["require_news_check"] = False
-    if args.watch and args.broker != "mcp":
-        print("--watch only makes sense with --broker mcp"); return 2
+    if (args.watch or args.always_on) and args.broker != "mcp":
+        print("--watch and --always-on only make sense with --broker mcp"); return 2
     llm = None
     if args.llm or args.llm_news:
         try:
@@ -123,6 +201,8 @@ async def run(args) -> int:
                 command=args.mcp_command, args=args.mcp_arg or None, terminal_path=cfg.get("mt5_path") or None))
         deps = Deps(broker=broker, cfg=cfg, clock=clock, setups=tuple(args.setups.split(",")),
                     llm=llm, llm_news=args.llm_news)
+        if args.always_on:
+            return await always_on(deps, args)
         if args.watch:
             print("Watching until %s NY, checking after every %d-minute bar. Ctrl+C to stop." % (
                 cfg["entry_cutoff"], cfg["tf_minutes"]))
@@ -149,6 +229,8 @@ def main(argv=None) -> None:
                     help="Claude researches today's USD events (web search) and adds them as blackouts")
     ap.add_argument("--watch", action="store_true",
                     help="mcp only: re-check after every bar until a ticket appears or the entry window closes")
+    ap.add_argument("--always-on", action="store_true",
+                    help="mcp only: run every weekday by itself (sleep outside the session, one ticket per day)")
     ap.add_argument("--mcp-command", default="uvx")
     ap.add_argument("--mcp-arg", action="append", help="repeatable; default: --from mcp-metatrader5-server --with pydantic<2.12 mt5mcp")
     if hasattr(sys.stdout, "reconfigure"):
