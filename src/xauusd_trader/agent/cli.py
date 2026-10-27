@@ -60,6 +60,11 @@ def retryable(res: dict, now: dt.datetime, cfg: dict) -> bool:
     return False
 
 
+def _every(cfg: dict) -> str:
+    s = int(cfg.get("poll_seconds") or cfg["tf_minutes"] * 60)
+    return "%d minute%s" % (s // 60, "" if s == 60 else "s") if s % 60 == 0 else "%d seconds" % s
+
+
 WAKE_EARLY_MIN = 10        # always-on wakes this long before the opening range to catch setup problems early
 
 
@@ -97,9 +102,9 @@ def _local(ny: dt.datetime) -> str:
 
 async def always_on(deps: Deps, args) -> int:
     cfg, done_day, errors, announced = deps.cfg, None, 0, None
-    print("Always-on: New York session %s-%s NY each weekday, checking after every %d-minute bar.\n"
+    print("Always-on: New York session %s-%s NY each weekday, checking every %s.\n"
           "One ticket per day. Keep this PC awake and MT5 open. Ctrl+C stops; nothing is sent without 'yes'." % (
-              cfg["range_start"], cfg["entry_cutoff"], cfg["tf_minutes"]))
+              cfg["range_start"], cfg["entry_cutoff"], _every(cfg)))
     while True:
         now = deps.clock()
         wake = next_wake(now, cfg, done_day == now.date())
@@ -121,7 +126,7 @@ async def always_on(deps: Deps, args) -> int:
             if errors >= 5:
                 print("Too many errors in a row; stopping. Check MT5 is open and logged in, then start again.")
                 return 1
-            await asyncio.sleep(seconds_to_next_bar(time.time(), cfg["tf_minutes"]))
+            await asyncio.sleep(seconds_to_next_poll(time.time(), poll_step(cfg)))
             continue
         now = deps.clock()
         what = "RETRY" if not done else classify(res, now, cfg)
@@ -134,13 +139,22 @@ async def always_on(deps: Deps, args) -> int:
             continue
         why = "; ".join(res.get("reasons") or [])
         print("[%s NY] %s%s" % (now.strftime("%H:%M"), res.get("outcome"), " - " + why if why else ""))
-        await asyncio.sleep(seconds_to_next_bar(time.time(), cfg["tf_minutes"]))
+        await asyncio.sleep(seconds_to_next_poll(time.time(), poll_step(cfg)))
+
+
+def poll_step(cfg: dict) -> int:
+    """Seconds between checks: `poll_seconds` if set, otherwise one bar. Signals still come from completed
+    bars only, so polling faster than a bar just notices a late-published bar sooner."""
+    return int(cfg.get("poll_seconds") or cfg["tf_minutes"] * 60)
+
+
+def seconds_to_next_poll(epoch: float, step_s: int, grace: int = 15) -> float:
+    """Seconds until the next multiple of `step_s` plus a grace period so the broker has published the bar."""
+    return step_s - (epoch % step_s) + grace
 
 
 def seconds_to_next_bar(epoch: float, tf_min: int, grace: int = 15) -> float:
-    """Seconds until the next bar boundary plus a grace period so the broker has closed the bar."""
-    step = tf_min * 60
-    return step - (epoch % step) + grace
+    return seconds_to_next_poll(epoch, tf_min * 60, grace)
 
 
 async def attempt(deps: Deps, args, watch: bool):
@@ -175,6 +189,8 @@ async def run(args) -> int:
     cfg = load_config()
     if args.no_news_check:
         cfg["require_news_check"] = False
+    if args.poll_seconds:
+        cfg["poll_seconds"] = args.poll_seconds
     if (args.watch or args.always_on) and args.broker != "mcp":
         print("--watch and --always-on only make sense with --broker mcp"); return 2
     llm = None
@@ -204,8 +220,7 @@ async def run(args) -> int:
         if args.always_on:
             return await always_on(deps, args)
         if args.watch:
-            print("Watching until %s NY, checking after every %d-minute bar. Ctrl+C to stop." % (
-                cfg["entry_cutoff"], cfg["tf_minutes"]))
+            print("Watching until %s NY, checking every %s. Ctrl+C to stop." % (cfg["entry_cutoff"], _every(cfg)))
         while True:
             res, done = await attempt(deps, args, args.watch)
             if done:
@@ -213,7 +228,7 @@ async def run(args) -> int:
             now = deps.clock()
             why = "; ".join(res.get("reasons") or [])
             print("[%s NY] %s%s" % (now.strftime("%H:%M"), res.get("outcome"), " - " + why if why else ""))
-            await asyncio.sleep(seconds_to_next_bar(time.time(), cfg["tf_minutes"]))
+            await asyncio.sleep(seconds_to_next_poll(time.time(), poll_step(cfg)))
 
 
 def main(argv=None) -> None:
@@ -231,6 +246,8 @@ def main(argv=None) -> None:
                     help="mcp only: re-check after every bar until a ticket appears or the entry window closes")
     ap.add_argument("--always-on", action="store_true",
                     help="mcp only: run every weekday by itself (sleep outside the session, one ticket per day)")
+    ap.add_argument("--poll-seconds", type=int, default=0,
+                    help="how often --watch/--always-on check (default: once per bar). 60 = every minute")
     ap.add_argument("--mcp-command", default="uvx")
     ap.add_argument("--mcp-arg", action="append", help="repeatable; default: --from mcp-metatrader5-server --with pydantic<2.12 mt5mcp")
     if hasattr(sys.stdout, "reconfigure"):

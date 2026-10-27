@@ -69,7 +69,7 @@ The broker is an interface. `McpBroker` talks to [`mcp-metatrader5-server`](http
 Daily use on Windows: double-click `trade.bat` (or run it from any folder). It starts the agent against the MT5 demo account with `--llm --llm-news --always-on` and then runs by itself:
 
 - sleeps outside the session and over weekends, and wakes 10 minutes before the opening range each weekday
-- re-checks after every 5-minute bar until the entry cutoff
+- re-checks every minute (`--poll-seconds 60`; leave it out to check once per bar) until the entry cutoff. Signals still come from completed 5-minute bars, so polling faster only notices a late-published bar sooner
 - beeps and shows a ticket when a valid setup appears; nothing is sent without typing `yes` (a late `yes` is refused: the risk verdict expires after 10 minutes and the price-drift check runs again)
 - one ticket per day (placed, rejected or refused), then waits for the next session
 - retries connection errors; stops on config or safety problems (non-demo account, unknown contract size) or after 5 errors in a row

@@ -6,7 +6,16 @@ pytest.importorskip("langgraph")
 
 from helpers import start  # noqa: E402
 
-from xauusd_trader.agent.cli import classify, next_wake, retryable, seconds_to_next_bar, window_end  # noqa: E402
+from xauusd_trader.agent.cli import (  # noqa: E402
+    _every,
+    classify,
+    next_wake,
+    poll_step,
+    retryable,
+    seconds_to_next_bar,
+    seconds_to_next_poll,
+    window_end,
+)
 from xauusd_trader.agent.graph import build_graph  # noqa: E402
 from xauusd_trader.agent.llm import ScriptedLLM  # noqa: E402
 
@@ -117,3 +126,23 @@ def test_classify_config_and_safety_problems_stop_the_loop(cfg):
 
 def test_classify_terminal_not_ready_is_transient(cfg):
     assert classify(res("PREFLIGHT_FAILED", "MT5 initialize failed; is the terminal open?"), EARLY, cfg) == "BROKER_DOWN"
+
+# ---- polling interval ------------------------------------------------------
+def test_poll_defaults_to_one_bar_and_can_be_set_to_a_minute(cfg):
+    assert poll_step(cfg) == 300
+    cfg["poll_seconds"] = 60
+    assert poll_step(cfg) == 60
+
+
+def test_seconds_to_next_poll_aligns_to_the_interval_plus_grace():
+    assert seconds_to_next_poll(1000 * 60 + 10, 60, grace=15) == pytest.approx(65)
+    assert seconds_to_next_poll(1000 * 60 + 59, 60, grace=15) == pytest.approx(16)
+    assert seconds_to_next_poll(1000 * 300 + 10, 300, grace=15) == pytest.approx(305)
+
+
+def test_every_describes_the_interval(cfg):
+    assert _every(cfg) == "5 minutes"
+    cfg["poll_seconds"] = 60
+    assert _every(cfg) == "1 minute"
+    cfg["poll_seconds"] = 90
+    assert _every(cfg) == "90 seconds"
