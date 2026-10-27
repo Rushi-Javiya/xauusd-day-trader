@@ -122,10 +122,15 @@ def build_nodes(d: Deps) -> Dict[str, Callable]:
         notes: List[str] = []
         if d.llm is not None and d.llm_news:
             try:
-                found = await research_news(d.llm, d.clock())
+                now = d.clock()
+                cache = d.extra.get("news_cache")      # watch mode: don't repeat paid searches every bar
+                fresh = cache is not None and now - cache["at"] < TD(minutes=60)
+                found = cache["events"] if fresh else await research_news(d.llm, now)
+                if not fresh:
+                    d.extra["news_cache"] = {"at": now, "events": found}
                 events, added = merge(events or [], found) if events is not None else (found, len(found))
-                notes.append("LLM news research: %d event(s) found, %d not in news.json "
-                             "(LLM-sourced, not human-verified)" % (len(found), added))
+                notes.append("LLM news research%s: %d event(s) found, %d not in news.json "
+                             "(LLM-sourced, not human-verified)" % (" (cached)" if fresh else "", len(found), added))
             except Exception as e:  # any LLM/parse failure falls back to the file, never to "no news"
                 notes.append("LLM news research failed (%s: %s); using news.json only" % (type(e).__name__, e))
         if events is None:

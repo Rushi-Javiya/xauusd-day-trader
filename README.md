@@ -66,6 +66,8 @@ gold-review
 
 The broker is an interface. `McpBroker` talks to [`mcp-metatrader5-server`](https://github.com/Qoyyuum/mcp-metatrader5-server) over stdio via `langchain-mcp-adapters` (one persistent session, never calls `login`); `PaperBroker` replays bars so everything is testable without MT5.
 
+Daily use on Windows: double-click `trade.bat` (or run it from any folder). It starts the agent against the MT5 demo account with `--llm --llm-news --watch`: it re-checks after every 5-minute bar, shows a ticket when a valid setup appears, and stops at the entry cutoff. Ctrl+C stops it; nothing is sent without typing `yes`.
+
 ```bash
 pip install -e ".[dev,agent]"
 gold-agent --broker paper --data gold/data/M5.json --now "2026-02-02 09:25" --setups orb   # replay
