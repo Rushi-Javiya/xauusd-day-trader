@@ -33,10 +33,10 @@ async def explain_trade(llm: LLM, state: dict, news_count: int) -> str:
         "plan": {k: plan.get(k) for k in ("side", "entry", "stop", "tp", "target_r", "risk_per_oz", "spread_used",
                                           "lots", "risk_acct", "account_ccy")},
         "news_events_today": news_count,
-        "notes": ["risk_per_oz includes the spread: longs fill at the ask, so risk_per_oz = entry + spread_used - "
-                  "stop; shorts are stopped on the ask. A gap between entry-stop and risk_per_oz is the spread, "
-                  "not an error.",
-                  "take-profit is also shifted by the spread for longs."],
+        "notes": ["LONG: fills at the ask, so risk_per_oz = entry + spread_used - stop (entry-stop differs from "
+                  "risk_per_oz by the spread; that is not an error) and take-profit is shifted by the spread too.",
+                  "SHORT: risk_per_oz = stop - entry exactly; the spread is NOT added. Do not mention the spread "
+                  "as part of a short trade's stop distance."],
     }
     text = await llm.complete(RATIONALE_SYSTEM, json.dumps(facts, default=str))
     return " ".join(text.split())[:MAX_RATIONALE]

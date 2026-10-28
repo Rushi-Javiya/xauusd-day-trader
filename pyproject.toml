@@ -26,6 +26,7 @@ gold-backtest = "xauusd_trader.backtest:main"
 gold-fetch = "xauusd_trader.fetch:main"
 gold-agent = "xauusd_trader.agent.cli:main"
 gold-review = "xauusd_trader.agent.cli:review_main"
+gold-tickets = "xauusd_trader.agent.audit:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

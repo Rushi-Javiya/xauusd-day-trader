@@ -18,6 +18,7 @@ import uuid
 from langgraph.types import Command
 
 from ..common import TD, hhmm, load_config, now_ny, ny_to_utc, parse_iso
+from . import audit
 from .broker import BrokerError, McpBroker, PaperBroker
 from .explain import review_journal
 from .graph import Deps, build_graph
@@ -35,6 +36,12 @@ def _show(res: dict, skip: int = 0) -> int:
 def _print_outcome(res: dict) -> None:
     why = res.get("reasons") or []
     print("\nOUTCOME: %s%s" % (res.get("outcome"), " (%s)" % "; ".join(why) if why else ""))
+
+
+def _log_outcome(res: dict) -> None:
+    order = (res.get("order") or {}).get("result") or {}
+    audit.append("outcome", outcome=res.get("outcome"), reasons=res.get("reasons") or [],
+                 order={"ticket": order.get("order"), "price": order.get("price")} if order else None)
 
 
 GOOD_EXIT = {"ORDER_PLACED", "NO_SIGNAL", "WAITING", "CONFLICT", "REJECTED"}
@@ -167,9 +174,12 @@ async def attempt(deps: Deps, args, watch: bool):
             return res, False
         _show(res)
         _print_outcome(res)
+        _log_outcome(res)
         return res, True
     shown = _show(res)
     ticket = res["__interrupt__"][0].value
+    audit.append("ticket", summary=ticket["summary"], rationale=ticket.get("rationale"), plan=ticket["plan"],
+                 ticket_hash=ticket["ticket_hash"])
     print("\a\nTICKET: " + ticket["summary"])
     if ticket.get("rationale"):
         print("WHY (written by the model, display only): " + ticket["rationale"])
@@ -178,9 +188,11 @@ async def attempt(deps: Deps, args, watch: bool):
     else:
         answer = input("Type yes to send this exact order to the demo account: ").strip().lower()
     decision = {"approved": answer == "yes", "ticket_hash": ticket["ticket_hash"]}
+    audit.append("decision", approved=decision["approved"], ticket_hash=ticket["ticket_hash"])
     res = await graph.ainvoke(Command(resume=decision), thread)
     _show(res, shown)
     _print_outcome(res)
+    _log_outcome(res)
     return res, True
 
 

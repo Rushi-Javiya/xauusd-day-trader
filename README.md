@@ -74,6 +74,8 @@ Daily use on Windows: double-click `trade.bat` (or run it from any folder). It s
 - one ticket per day (placed, rejected or refused), then waits for the next session
 - retries connection errors; stops on config or safety problems (non-demo account, unknown contract size) or after 5 errors in a row
 
+Every ticket, your answer and the outcome are also written to `gold/agent_log.jsonl`, so closing the window never loses a ticket: run `gold-tickets` to read them back.
+
 Keep the window open, MT5 logged in and the PC awake. `--watch` does the same for a single session and then exits.
 
 ```bash
