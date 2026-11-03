@@ -155,6 +155,6 @@ MIT, see [LICENSE](LICENSE).
 - [x] Adversarial tests: hostile model output cannot change an order or approve a ticket
 - [ ] Position management after entry (flat-by time, journal close from MT5 history)
 - [ ] Tracing (Langfuse / LangSmith) and a larger eval set across many replayed days
-- [ ] Journal dashboard
+- [ ] Journal dashboard 
 - [x] Package refactor (`src/` layout, console commands)
 - [ ] Typed config (pydantic) and friendlier CLI errors
