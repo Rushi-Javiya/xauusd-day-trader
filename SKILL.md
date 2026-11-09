@@ -15,6 +15,8 @@ Gold only. Not for stocks or other symbols. All times are **New York time** unle
 5. **Never raise risk to make a trade fit.** If the lot size is below the broker minimum, say so and stop. The user decides about changing limits.
 6. Do not chase stale signals (older than 2 bars). Do not move a stop further away after entry.
 
+**Switchable limits.** The daily loss limit, trades per day, losses-in-a-row stop and entry window are user settings: `0` (or `entry_window: false`) turns them off in the user's own config. Respect what the config says; do not re-impose a limit the user has switched off, and do not switch one off yourself. Rules 1-3, 5 and 6 above are not switchable.
+
 ## Files
 `scripts/` holds launchers for the tools in `src/xauusd_trader/` (Python 3.11+, standard library only; `fetch.py` also needs `pip install MetaTrader5` on Windows). Work files live in `gold/` (override with env var `GOLD_DIR`): `config.json`, `data/M5.json`, `levels.json`, `entry.json`, `plan.json`, `risk.json`, `news.json`, `journal.csv`.
 

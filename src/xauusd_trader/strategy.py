@@ -19,7 +19,7 @@ def find_signals(day_bars, lv, cfg, setups=("orb", "retest", "sweep")):
     tf = cfg["tf_minutes"]
     or_end = parse_iso(lv["or_end"])
     d0 = parse_iso(lv["or_start"]).replace(hour=0, minute=0)
-    cutoff = d0 + TD(minutes=hhmm(cfg["entry_cutoff"]))
+    cutoff = d0 + TD(minutes=hhmm(session_cutoff(cfg)))
     orh, orl, atr5 = lv["or_high"], lv["or_low"], lv["atr5"]
     buf = cfg["stop_buffer_usd"]
     post = [b for b in day_bars if or_end <= b["t"] < cutoff]

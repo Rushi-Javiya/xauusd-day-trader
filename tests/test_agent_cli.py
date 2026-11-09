@@ -9,6 +9,8 @@ from helpers import start  # noqa: E402
 from xauusd_trader.agent.cli import (  # noqa: E402
     _every,
     classify,
+    describe_limits,
+    next_market_open,
     next_wake,
     poll_step,
     retryable,
@@ -146,3 +148,30 @@ def test_every_describes_the_interval(cfg):
     assert _every(cfg) == "1 minute"
     cfg["poll_seconds"] = 90
     assert _every(cfg) == "90 seconds"
+
+# ---- no-window (continuous) mode -------------------------------------------
+def test_transient_outcomes_keep_retrying_all_day_without_a_window(cfg):
+    cfg["entry_window"] = False
+    assert retryable(res("NO_SIGNAL"), at(MON, 15, 0), cfg)
+    assert retryable(res("WAITING"), at(MON, 20, 0), cfg)
+    assert not retryable(res("REFUSED", "stop too tight"), at(MON, 15, 0), cfg)
+
+
+def test_next_market_open_skips_the_daily_break_and_the_weekend():
+    assert next_market_open(at(MON, 10, 0)) == at(MON, 10, 0)                       # open now
+    assert next_market_open(at(MON, 17, 20)) == at(MON, 18, 0)                      # 17:00-18:00 break
+    assert next_market_open(at(FRI, 17, 5)) == at(D(2026, 1, 18), 18, 0)            # Friday close -> Sunday 18:00
+    assert next_market_open(at(D(2026, 1, 17), 9, 0)) == at(D(2026, 1, 18), 18, 0)  # Saturday
+
+
+def test_describe_limits_lists_only_what_is_off(cfg):
+    assert describe_limits(cfg) == ""
+    cfg.update(entry_window=False, max_trades_per_day=0, daily_loss_limit_pct=0, max_consecutive_losses=0)
+    assert describe_limits(cfg) == "entry window, trades per day, daily loss limit, losses-in-a-row stop"
+
+def test_feed_timestamp_glitches_are_retried_but_account_problems_are_fatal(cfg):
+    glitch = "bar_time_mode is 'server' but the feed looks like 'utc'; set bar_time_mode accordingly"
+    assert classify(res("PREFLIGHT_FAILED", glitch), EARLY, cfg) == "BROKER_DOWN"
+    assert classify(res("PREFLIGHT_FAILED", "tick time is +9.0h from UTC, matching neither"), EARLY, cfg) == "BROKER_DOWN"
+    mixed = ["account is not a demo account (trade_mode=2)", glitch]
+    assert classify(res("PREFLIGHT_FAILED", *mixed), EARLY, cfg) == "FATAL"

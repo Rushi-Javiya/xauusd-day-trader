@@ -24,7 +24,7 @@ def main():
     tf = TD(minutes=cfg["tf_minutes"])
     now_complete = last + tf
     d0 = parse_iso(lv["or_start"]).replace(hour=0, minute=0)
-    cutoff = d0 + TD(minutes=hhmm(cfg["entry_cutoff"]))
+    cutoff = d0 + TD(minutes=hhmm(session_cutoff(cfg)))
     print("XAUUSD entry check | session %s | last completed bar closes %s NY | price %.2f" % (
         date, iso(now_complete), bars[-1]["c"]))
     if not lv["or_complete"]:

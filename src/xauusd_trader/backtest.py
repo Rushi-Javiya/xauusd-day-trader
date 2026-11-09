@@ -10,7 +10,7 @@ from . import levels, strategy, plan as planmod
 def simulate(day_bars, sig, p, cfg):
     t0 = parse_iso(sig["time"])
     d0 = parse_iso(levels_date(sig)).replace(hour=0, minute=0)
-    flat = d0 + TD(minutes=hhmm(cfg["flat_by"]))
+    flat = d0 + TD(minutes=hhmm(cfg["flat_by"] or TRADING_DAY_END))
     sp, long_ = p["spread_used"], p["side"] == "long"
     st, tp, entry = p["stop"], p["tp"], p["entry"]
     last = None

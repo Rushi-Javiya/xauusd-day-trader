@@ -84,3 +84,35 @@ def test_plan_hash_changes_with_plan(plan):
     plan["stop"] = 3344.0
     assert risk.plan_hash(plan) != h1
     assert len(h1) == 16
+
+# ---- limits can be switched off (0 / entry_window False); defaults stay strict -----------------------------
+def test_zero_turns_off_trade_count_loss_limit_and_streak_stop(cfg, plan):
+    cfg.update(max_trades_per_day=0, daily_loss_limit_pct=0, max_consecutive_losses=0)
+    rows = [row(exit="1", pnl_acct="-500", r_multiple="-1") for _ in range(12)]
+    assert risk.evaluate(plan, cfg, NOW, rows, []) == []
+
+
+def test_limits_are_still_on_by_default(cfg, plan):
+    rows = [row(exit="1", pnl_acct="-500", r_multiple="-1") for _ in range(12)]
+    why = " | ".join(risk.evaluate(plan, cfg, NOW, rows, []))
+    assert "trades today" in why and "daily loss limit" in why and "in a row" in why
+
+
+def test_no_entry_window_allows_any_time_while_the_market_is_open(cfg, plan):
+    cfg["entry_window"] = False
+    for n in (D(2026, 1, 12, 13, 0), D(2026, 1, 12, 20, 30), D(2026, 1, 13, 2, 15)):
+        assert risk.evaluate(plan, cfg, n, [], []) == []
+
+
+@pytest.mark.parametrize("n", [D(2026, 1, 10, 9, 0), D(2026, 1, 11, 12, 0), D(2026, 1, 12, 17, 30)])
+def test_no_entry_window_still_refuses_a_closed_market(cfg, plan, n):
+    cfg["entry_window"] = False
+    assert any("market closed" in w for w in risk.evaluate(plan, cfg, n, [], []))
+
+
+def test_unrestricted_mode_keeps_per_trade_risk_rr_and_news_checks(cfg, plan):
+    cfg.update(entry_window=False, max_trades_per_day=0, daily_loss_limit_pct=0, max_consecutive_losses=0)
+    plan.update(risk_acct=60.0, rr=0.5)
+    news = [{"time_ny": "2026-01-12 09:05", "title": "CPI"}]
+    why = " | ".join(risk.evaluate(plan, cfg, NOW, [], news))
+    assert "exceeds max loss" in why and "reward:risk" in why and "news blackout" in why

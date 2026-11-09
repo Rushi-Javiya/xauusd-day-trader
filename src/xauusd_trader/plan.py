@@ -100,8 +100,8 @@ def main():
         plan["entry"], plan["stop"], plan["tp"], plan["target_r"], plan["tp_1r"]))
     print("  risk %.2f $/oz  ->  %.2f lots  ->  max loss at stop %.2f %s (allowed %.2f)" % (
         plan["risk_per_oz"], plan["lots"], plan["risk_acct"], plan["account_ccy"], plan["max_loss_allowed"]))
-    print("  1 lot = %d oz, so a $1 move = $%d per lot. Flat by %s NY." % (
-        plan["contract_size"], plan["contract_size"], cfg["flat_by"]))
+    print("  1 lot = %d oz, so a $1 move = $%d per lot.%s" % (
+        plan["contract_size"], plan["contract_size"], " Flat by %s NY." % cfg["flat_by"] if cfg["flat_by"] else ""))
     if a.write:
         save_json("plan.json", plan)
         print("wrote gold/plan.json. Next: risk.py")

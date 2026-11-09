@@ -18,7 +18,7 @@ from langgraph.types import interrupt
 from .. import journal, levels, strategy
 from .. import plan as planmod
 from .. import risk
-from ..common import TD, bars_from_rows, day_key, group_days, iso, load_json, ny_to_utc, parse_iso
+from ..common import TD, bars_from_rows, day_key, group_days, iso, load_json, ny_to_utc, parse_iso, save_json
 from . import guard
 from .broker import Broker, BrokerError
 from .explain import explain_trade
@@ -47,6 +47,26 @@ def _file_news() -> Optional[list]:
     return load_json("news.json")
 
 
+HANDLED_FILE = "handled_signals.json"
+HANDLED_KEEP = 300
+
+
+def signal_key(s: dict) -> str:
+    return "%s|%s|%s" % (s["time"], s["setup"], s["side"])
+
+
+def handled_signals() -> set:
+    return set(load_json(HANDLED_FILE, []) or [])
+
+
+def mark_handled(s: dict) -> None:
+    """Remember a signal so it is never ticketed twice (the same signal stays fresh for several polls)."""
+    keys = list(load_json(HANDLED_FILE, []) or [])
+    k = signal_key(s)
+    if k not in keys:
+        save_json(HANDLED_FILE, (keys + [k])[-HANDLED_KEEP:])
+
+
 @dataclass
 class Deps:
     broker: Broker
@@ -57,6 +77,7 @@ class Deps:
     stale_bars: int = 2
     llm: Optional[LLM] = None          # explains the ticket; with llm_news also researches the calendar
     llm_news: bool = False
+    track_handled: Optional[bool] = None   # remember handled signals; default: on for real brokers, off for replays
     log_trades: bool = True
     extra: dict = field(default_factory=dict)
 
@@ -71,6 +92,7 @@ def _end(outcome: str, reasons: Sequence[str] = (), msg: str = "") -> dict:
 def build_nodes(d: Deps) -> Dict[str, Callable]:
     cfg, broker = d.cfg, d.broker
     sym = cfg["symbol"]
+    track = (not broker.replay) if d.track_handled is None else d.track_handled
     tf = TD(minutes=cfg["tf_minutes"])
 
     async def preflight(state: TradeState):
@@ -148,9 +170,12 @@ def build_nodes(d: Deps) -> Dict[str, Callable]:
         for s in sigs:
             s["age_min"] = int((now_complete - parse_iso(s["time"])).total_seconds() // 60)
         fresh = [s for s in sigs if s["age_min"] <= d.stale_bars * cfg["tf_minutes"]]
-        if not fresh:
-            why = "signals exist but are stale" if sigs else "no signal yet"
+        seen = handled_signals() if track else set()
+        new = [s for s in fresh if signal_key(s) not in seen]
+        if not new:
+            why = ("signal already handled" if fresh else "signals exist but are stale") if sigs else "no signal yet"
             return _end("NO_SIGNAL", [why])
+        fresh = new
         if len({s["side"] for s in fresh}) > 1:
             return _end("CONFLICT", ["fresh signals point in opposite directions; standing aside"])
         s = fresh[-1]
@@ -158,11 +183,13 @@ def build_nodes(d: Deps) -> Dict[str, Callable]:
 
     async def plan_node(state: TradeState):
         p, err = planmod.price_plan(state["signal"], cfg)
+        if not err:
+            p, err = planmod.size_plan(p, cfg)
         if err:
+            if track:
+                mark_handled(state["signal"])        # a refused signal will not become valid by waiting
             return _end("REFUSED", [err])
-        plan, err = planmod.size_plan(p, cfg)
-        if err:
-            return _end("REFUSED", [err])
+        plan = p
         return {"plan": plan, "log": ["plan %s %.2f lots stop %.2f tp %.2f risk %.2f %s" % (
             plan["side"], plan["lots"], plan["stop"], plan["tp"], plan["risk_acct"], plan["account_ccy"])]}
 
@@ -188,12 +215,15 @@ def build_nodes(d: Deps) -> Dict[str, Callable]:
         ticket = {
             "ticket_hash": guard.ticket_hash(p),
             "rationale": state.get("rationale"),
-            "summary": "%s %s %.2f lots @ ~%.2f | stop %.2f | take-profit %.2f (%.1fR) | max loss %.2f %s | flat by %s NY"
+            "summary": "%s %s %.2f lots @ ~%.2f | stop %.2f | take-profit %.2f (%.1fR) | max loss %.2f %s%s"
                        % (p["symbol"], p["side"].upper(), p["lots"], p["entry"], p["stop"], p["tp"],
-                          p["target_r"], p["risk_acct"], p["account_ccy"], cfg["flat_by"]),
+                          p["target_r"], p["risk_acct"], p["account_ccy"],
+                          " | flat by %s NY" % cfg["flat_by"] if cfg.get("flat_by") else ""),
             "plan": p,
         }
         decision = interrupt(ticket)
+        if track:
+            mark_handled(state["signal"])            # one ticket per signal, whatever the answer
         if not isinstance(decision, dict) or decision.get("approved") is not True:
             return {"ticket": ticket, "approval": {"approved": False}, **_end("REJECTED", ["not approved"])}
         return {"ticket": ticket, "approval": decision, "log": ["ticket approved"]}

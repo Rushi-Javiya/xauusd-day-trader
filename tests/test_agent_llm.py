@@ -90,7 +90,9 @@ def test_env_file_does_not_override_existing(tmp_path, monkeypatch):
 
 
 # ---- rationale in the graph ------------------------------------------------
-def test_rationale_is_shown_but_does_not_change_the_ticket_hash(scenario):
+def test_rationale_is_shown_but_does_not_change_the_ticket_hash(scenario, monkeypatch):
+    from xauusd_trader import plan as planmod
+    monkeypatch.setattr(planmod, "now_ny", lambda: D(2026, 1, 12, 9, 0))   # plan carries created_ny; freeze it
     _, deps, _ = scenario
     plain = start(build_graph(deps))["__interrupt__"][0].value
     deps.llm = ScriptedLLM("The opening range broke upward; invalid if price closes back inside.")

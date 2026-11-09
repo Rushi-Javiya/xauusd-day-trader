@@ -20,9 +20,10 @@ def evaluate(plan, cfg, n, rows, news):
     m = n.hour * 60 + n.minute
     if market_closed(n):
         why.append("market closed at %s NY" % iso(n))
-    lo, hi = hhmm(cfg["range_start"]) + cfg["range_minutes"], hhmm(cfg["entry_cutoff"])
-    if not (lo <= m < hi):
-        why.append("outside entry window %02d:%02d-%s NY (now %s)" % (lo // 60, lo % 60, cfg["entry_cutoff"], iso(n)[-5:]))
+    if cfg.get("entry_window", True):
+        lo, hi = hhmm(cfg["range_start"]) + cfg["range_minutes"], hhmm(cfg["entry_cutoff"])
+        if not (lo <= m < hi):
+            why.append("outside entry window %02d:%02d-%s NY (now %s)" % (lo // 60, lo % 60, cfg["entry_cutoff"], iso(n)[-5:]))
     if plan["risk_acct"] > plan["max_loss_allowed"] + 1e-6:
         why.append("risk %.2f exceeds max loss per trade %.2f" % (plan["risk_acct"], plan["max_loss_allowed"]))
     if plan["rr"] < cfg["min_rr"]:
@@ -30,16 +31,18 @@ def evaluate(plan, cfg, n, rows, news):
     if not plan.get("stop"):
         why.append("no stop")
     today = [r for r in rows if r["date_ny"] == str(n.date())]
-    if len(today) >= cfg["max_trades_per_day"]:
+    # 0 turns a limit off
+    if cfg["max_trades_per_day"] and len(today) >= cfg["max_trades_per_day"]:
         why.append("already %d trades today (max %d)" % (len(today), cfg["max_trades_per_day"]))
     closed = [r for r in today if r["exit"] != ""]
-    pnl = sum(journal.fnum(r["pnl_acct"]) for r in closed)
-    open_risk = sum(journal.fnum(r["risk_acct"]) for r in today if r["exit"] == "")
-    limit = cfg["account_balance"] * cfg["daily_loss_limit_pct"] / 100.0
-    if pnl - open_risk - plan["risk_acct"] < -limit:
-        why.append("worst case today %.2f would break daily loss limit -%.2f" % (pnl - open_risk - plan["risk_acct"], limit))
+    if cfg["daily_loss_limit_pct"]:
+        pnl = sum(journal.fnum(r["pnl_acct"]) for r in closed)
+        open_risk = sum(journal.fnum(r["risk_acct"]) for r in today if r["exit"] == "")
+        limit = cfg["account_balance"] * cfg["daily_loss_limit_pct"] / 100.0
+        if pnl - open_risk - plan["risk_acct"] < -limit:
+            why.append("worst case today %.2f would break daily loss limit -%.2f" % (pnl - open_risk - plan["risk_acct"], limit))
     k = cfg["max_consecutive_losses"]
-    if len(closed) >= k and all(journal.fnum(r["r_multiple"]) < 0 for r in closed[-k:]):
+    if k and len(closed) >= k and all(journal.fnum(r["r_multiple"]) < 0 for r in closed[-k:]):
         why.append("%d losses in a row today: stop trading for the day" % k)
     for ev in news:
         t = parse_iso(ev["time_ny"])

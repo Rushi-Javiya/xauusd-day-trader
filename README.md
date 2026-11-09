@@ -78,6 +78,22 @@ Every ticket, your answer and the outcome are also written to `gold/agent_log.js
 
 Keep the window open, MT5 logged in and the PC awake. `--watch` does the same for a single session and then exits.
 
+### Turning the limits off (your `gold/config.json`)
+
+The repo defaults are conservative. Each limit can be switched off in your own, git-ignored config:
+
+| Setting | Off value | Effect |
+|---|---|---|
+| `entry_window` | `false` | no 08:45-11:30 window; signals allowed until the trading day ends at 17:00 NY |
+| `max_trades_per_day` | `0` | unlimited tickets per day |
+| `daily_loss_limit_pct` | `0` | no daily loss cap |
+| `max_consecutive_losses` | `0` | no losses-in-a-row stop |
+| `flat_by` | `""` | no flat-by reminder on the ticket |
+
+With `entry_window` off, `--always-on` runs continuously: it checks every minute whenever gold is trading and sleeps only for the weekend and the 17:00-18:00 NY break. Every signal still gets exactly one ticket (handled signals are remembered in `gold/handled_signals.json`) and each ticket still needs a typed `yes`.
+
+These stay on regardless: demo-account-only, per-trade risk sizing (lots from stop distance and `max_loss_per_trade_pct`), minimum reward:risk, the news blackout, the price-drift check and the hash-bound risk verdict. Note that the strategy itself produces at most one signal per setup per trading day (orb, retest, sweep) and builds on the New York opening range, so "unlimited" means no cap from the risk gate, not more setups.
+
 ```bash
 pip install -e ".[dev,agent]"
 gold-agent --broker paper --data gold/data/M5.json --now "2026-02-02 09:25" --setups orb   # replay

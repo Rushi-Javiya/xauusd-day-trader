@@ -132,3 +132,50 @@ def test_broker_error_on_send_is_reported_not_journaled(scenario):
     h = res["__interrupt__"][0].value["ticket_hash"]
     res = invoke(g, Command(resume={"approved": True, "ticket_hash": h}))
     assert res["outcome"] == "ORDER_FAILED" and journal.read() == []
+
+# ---- each signal is ticketed once -------------------------------------------
+def test_a_handled_signal_is_not_ticketed_again(scenario):
+    broker, deps, _ = scenario
+    deps.track_handled = True
+    g = build_graph(deps)
+    start(g)
+    invoke(g, Command(resume={"approved": False}))
+    again = start(build_graph(deps))
+    assert again["outcome"] == "NO_SIGNAL" and "already handled" in again["reasons"][0] and broker.sent == []
+
+
+def test_an_approved_signal_is_not_traded_twice(scenario):
+    broker, deps, _ = scenario
+    deps.track_handled = True
+    g = build_graph(deps)
+    h = start(g)["__interrupt__"][0].value["ticket_hash"]
+    assert invoke(g, Command(resume={"approved": True, "ticket_hash": h}))["outcome"] == "ORDER_PLACED"
+    assert start(build_graph(deps))["outcome"] == "NO_SIGNAL"
+    assert len(broker.sent) == 1
+
+
+def test_an_unanswered_ticket_is_not_marked_handled(scenario):
+    _, deps, _ = scenario
+    deps.track_handled = True
+    start(build_graph(deps))
+    assert "__interrupt__" in start(build_graph(deps))        # the ticket is offered again until answered
+
+
+def test_replays_do_not_remember_signals_by_default(scenario):
+    _, deps, _ = scenario
+    g = build_graph(deps)
+    start(g)
+    invoke(g, Command(resume={"approved": False}))
+    assert "__interrupt__" in start(build_graph(deps))
+
+
+def test_with_all_limits_off_the_risk_gate_never_blocks_a_later_ticket(scenario):
+    broker, deps, _ = scenario
+    deps.cfg.update(max_trades_per_day=0, daily_loss_limit_pct=0, max_consecutive_losses=0, entry_window=False)
+    for i in range(5):                                       # past the default cap of 3; replay does not dedupe signals
+        g = build_graph(deps)
+        res = start(g)
+        assert "__interrupt__" in res
+        h = res["__interrupt__"][0].value["ticket_hash"]
+        assert invoke(g, Command(resume={"approved": True, "ticket_hash": h}))["outcome"] == "ORDER_PLACED"
+    assert len(broker.sent) == 5 and len(journal.read()) == 5

@@ -17,7 +17,8 @@ import uuid
 
 from langgraph.types import Command
 
-from ..common import TD, hhmm, load_config, now_ny, ny_to_utc, parse_iso
+from ..common import TD, hhmm, load_config, now_ny, ny_to_utc, parse_iso, session_cutoff
+from ..risk import market_closed
 from . import audit
 from .broker import BrokerError, McpBroker, PaperBroker
 from .explain import review_journal
@@ -47,17 +48,18 @@ def _log_outcome(res: dict) -> None:
 GOOD_EXIT = {"ORDER_PLACED", "NO_SIGNAL", "WAITING", "CONFLICT", "REJECTED"}
 RETRY_OUTCOMES = {"WAITING", "NO_SIGNAL", "CONFLICT", "STALE_DATA", "PRICE_MOVED"}
 TRANSIENT_BLOCKS = ("news blackout", "outside entry window")
+TRANSIENT_PREFLIGHT = ("tick time is", "bar_time_mode is")
 
 
 def window_end(now: dt.datetime, cfg: dict) -> dt.datetime:
-    return now.replace(hour=0, minute=0, second=0, microsecond=0) + TD(minutes=hhmm(cfg["entry_cutoff"]))
+    return now.replace(hour=0, minute=0, second=0, microsecond=0) + TD(minutes=hhmm(session_cutoff(cfg)))
 
 
 def retryable(res: dict, now: dt.datetime, cfg: dict) -> bool:
     """Should --watch try again on the next bar? Only for outcomes that can change by themselves, and only
     while the entry window is still open. Anything final (refused plan, failed preflight, rejected ticket,
     placed order, trade-count or loss limits) stops the loop."""
-    if now >= window_end(now, cfg):
+    if cfg.get("entry_window", True) and now >= window_end(now, cfg):
         return False
     outcome = res.get("outcome")
     if outcome in RETRY_OUTCOMES:
@@ -84,10 +86,33 @@ def next_wake(now: dt.datetime, cfg: dict, done_today: bool = False) -> dt.datet
         if d.weekday() > 4 or (i == 0 and done_today):
             continue
         wake = d + TD(minutes=hhmm(cfg["range_start"]) - WAKE_EARLY_MIN)
-        end = d + TD(minutes=hhmm(cfg["entry_cutoff"]))
+        end = d + TD(minutes=hhmm(session_cutoff(cfg)))
         if now < end:
             return max(wake, now)
     raise RuntimeError("no session found")
+
+
+def next_market_open(now: dt.datetime) -> dt.datetime:
+    """`now` if gold is trading, else the first minute it trades again (weekend, 17:00-18:00 NY break)."""
+    t = now.replace(second=0, microsecond=0)
+    for _ in range(60 * 24 * 4):
+        if not market_closed(t):
+            return max(t, now)
+        t += TD(minutes=1)
+    raise RuntimeError("market never reopens?")
+
+
+def describe_limits(cfg: dict) -> str:
+    off = []
+    if not cfg.get("entry_window", True):
+        off.append("entry window")
+    if not cfg["max_trades_per_day"]:
+        off.append("trades per day")
+    if not cfg["daily_loss_limit_pct"]:
+        off.append("daily loss limit")
+    if not cfg["max_consecutive_losses"]:
+        off.append("losses-in-a-row stop")
+    return ", ".join(off)
 
 
 def classify(res: dict, now: dt.datetime, cfg: dict) -> str:
@@ -96,9 +121,10 @@ def classify(res: dict, now: dt.datetime, cfg: dict) -> str:
     if retryable(res, now, cfg):
         return "RETRY"
     if res.get("outcome") == "PREFLIGHT_FAILED":
-        if any("initialize failed" in r for r in res.get("reasons") or []):
-            return "BROKER_DOWN"
-        return "FATAL"
+        reasons = res.get("reasons") or []
+        if reasons and all(r.startswith(TRANSIENT_PREFLIGHT) or "initialize failed" in r for r in reasons):
+            return "BROKER_DOWN"           # terminal not ready / feed glitch: nothing can trade meanwhile, so retry
+        return "FATAL"                     # non-demo account, contract size or lot-rule mismatch: needs a human
     return "DAY_DONE"
 
 
@@ -109,12 +135,23 @@ def _local(ny: dt.datetime) -> str:
 
 async def always_on(deps: Deps, args) -> int:
     cfg, done_day, errors, announced = deps.cfg, None, 0, None
-    print("Always-on: New York session %s-%s NY each weekday, checking every %s.\n"
-          "One ticket per day. Keep this PC awake and MT5 open. Ctrl+C stops; nothing is sent without 'yes'." % (
-              cfg["range_start"], cfg["entry_cutoff"], _every(cfg)))
+    continuous = not cfg.get("entry_window", True)
+    if continuous:
+        print("Always-on, no entry window: checking every %s whenever gold is trading (sleeps for the weekend and the\n"
+              "17:00-18:00 NY break). Signals come from the NY opening range of each trading day, so new setups can\n"
+              "appear from %s NY until 17:00 NY. Every signal gets one ticket and each ticket needs 'yes'.\n"
+              "Limits OFF: %s. Per-trade risk sizing, news blackout, demo-only and price-drift checks stay on.\n"
+              "Keep this PC awake and MT5 open. Ctrl+C stops." % (
+                  _every(cfg), "%02d:%02d" % divmod(hhmm(cfg["range_start"]) + cfg["range_minutes"], 60),
+                  describe_limits(cfg) or "none"))
+    else:
+        print("Always-on: New York session %s-%s NY each weekday, checking every %s.\n"
+              "One ticket per day. Keep this PC awake and MT5 open. Ctrl+C stops; nothing is sent without 'yes'." % (
+                  cfg["range_start"], cfg["entry_cutoff"], _every(cfg)))
+    last_line, last_t = None, 0.0
     while True:
         now = deps.clock()
-        wake = next_wake(now, cfg, done_day == now.date())
+        wake = next_market_open(now) if continuous else next_wake(now, cfg, done_day == now.date())
         if wake > now:
             if announced != wake:
                 print("[%s NY] Sleeping until %s NY (%s)" % (now.strftime("%a %H:%M"), wake.strftime("%a %H:%M"),
@@ -139,6 +176,14 @@ async def always_on(deps: Deps, args) -> int:
         what = "RETRY" if not done else classify(res, now, cfg)
         if what == "FATAL":
             return 1
+        if continuous:
+            if not done:
+                line = "%s%s" % (res.get("outcome"), " - " + "; ".join(res.get("reasons") or []) if res.get("reasons") else "")
+                if line != last_line or time.time() - last_t > 3600:      # print changes, plus an hourly heartbeat
+                    print("[%s NY] %s" % (now.strftime("%a %H:%M"), line))
+                    last_line, last_t = line, time.time()
+            await asyncio.sleep(seconds_to_next_poll(time.time(), poll_step(cfg)))
+            continue
         if what == "DAY_DONE":
             done_day = now.date()
             print("[%s NY] Done for today (%s). Waiting for the next session." % (now.strftime("%H:%M"),

@@ -83,3 +83,19 @@ def test_sweep_too_shallow_is_ignored(cfg):
 def test_nothing_after_entry_cutoff(cfg):
     bars = [bar("11:30", 3349, 3351.5, 3348.9, 3351.0)]
     assert strategy.find_signals(bars, levels(), cfg, ("orb",)) == []
+
+def test_entry_window_off_allows_signals_until_the_trading_day_ends(cfg):
+    inside = [bar("%02d:%02d" % (h, m), 3347, 3349, 3346, 3348) for h in (8, 9, 10, 11, 12, 13) for m in range(0, 60, 5)
+              if (h, m) >= (8, 45)]
+    late_break = inside + [bar("14:00", 3349, 3352, 3348.9, 3351.5)]
+    assert strategy.find_signals(late_break, levels(), cfg, ("orb",)) == []
+    cfg["entry_window"] = False
+    s = strategy.find_signals(late_break, levels(), cfg, ("orb",))
+    assert len(s) == 1 and s[0]["time"] == "2026-01-12 14:05"
+
+
+def test_session_cutoff(cfg):
+    from xauusd_trader.common import session_cutoff
+    assert session_cutoff(cfg) == "11:30"
+    cfg["entry_window"] = False
+    assert session_cutoff(cfg) == "17:00"

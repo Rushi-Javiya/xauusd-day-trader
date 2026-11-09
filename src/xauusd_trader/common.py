@@ -30,7 +30,8 @@ DEFAULTS = {
     "range_start": "08:30",          # New York time
     "range_minutes": 15,
     "entry_cutoff": "11:30",
-    "flat_by": "16:30",
+    "entry_window": True,            # False: no entry window; signals allowed until the trading day ends (17:00 NY)
+    "flat_by": "16:30",              # "" = no time-based flat reminder
     "or_min_usd": 3.0,
     "or_max_usd": 25.0,
     "retest_tol_atr": 0.35,
@@ -53,6 +54,14 @@ DEFAULTS = {
 
 def path(*p):
     return os.path.join(WORKDIR, *p)
+
+
+TRADING_DAY_END = "17:00"        # New York; the trading day (and `day_key`) rolls over here
+
+
+def session_cutoff(cfg):
+    """Last time of day (NY) at which a new entry may be taken."""
+    return cfg["entry_cutoff"] if cfg.get("entry_window", True) else TRADING_DAY_END
 
 
 def ensure():
