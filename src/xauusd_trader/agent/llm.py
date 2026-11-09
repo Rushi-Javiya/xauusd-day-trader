@@ -38,7 +38,8 @@ class ClaudeLLM:
 
     async def complete(self, system: str, prompt: str, *, web_search: bool = False) -> str:
         from langchain_anthropic import ChatAnthropic
-        chat = ChatAnthropic(model=self.news_model if web_search else self.model, max_tokens=self.max_tokens)
+        chat = ChatAnthropic(model=self.news_model if web_search else self.model,
+                            max_tokens=max(self.max_tokens, 3000) if web_search else self.max_tokens)
         if web_search:
             chat = chat.bind_tools([{"type": "web_search_20250305", "name": "web_search", "max_uses": 3}])
         msg = await chat.ainvoke([("system", system), ("human", prompt)])

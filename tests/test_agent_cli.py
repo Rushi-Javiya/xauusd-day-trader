@@ -34,13 +34,13 @@ def test_window_end(cfg):
     assert window_end(EARLY, cfg) == D(2026, 1, 12, 11, 30)
 
 
-@pytest.mark.parametrize("outcome", ["WAITING", "NO_SIGNAL", "CONFLICT", "STALE_DATA", "PRICE_MOVED"])
+@pytest.mark.parametrize("outcome", ["WAITING", "NO_SIGNAL", "CONFLICT", "STALE_DATA", "PRICE_MOVED", "NEWS_UNCHECKED"])
 def test_transient_outcomes_are_retried(cfg, outcome):
     assert retryable(res(outcome), EARLY, cfg)
 
 
 @pytest.mark.parametrize("outcome", ["PREFLIGHT_FAILED", "REFUSED", "REJECTED", "ORDER_PLACED", "ORDER_FAILED",
-                                     "ORDER_CHECK_FAILED", "NOT_AUTHORIZED", "NEWS_UNCHECKED", "NO_DATA"])
+                                     "ORDER_CHECK_FAILED", "NOT_AUTHORIZED", "NO_DATA"])
 def test_final_outcomes_stop_the_watch(cfg, outcome):
     assert not retryable(res(outcome), EARLY, cfg)
 

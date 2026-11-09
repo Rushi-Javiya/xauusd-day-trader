@@ -207,3 +207,43 @@ def test_review_feeds_deterministic_stats_to_the_model(tmp_path, monkeypatch):
     payload = json.loads(llm.calls[0]["prompt"])
     assert payload["closed_trades"] == 2 and payload["stats"]["all"]["total_r"] == 1.0
     assert "setup=orb" in payload["stats"]
+
+# ---- flaky model replies ----------------------------------------------------
+def test_research_retries_when_the_first_reply_is_not_json():
+    llm = ScriptedLLM("", "I could not find anything, sorry.", '[{"time_ny": "2026-01-12 10:00", "title": "ISM"}]')
+    out = asyncio.run(news.research_news(llm, NOW))
+    assert [e["title"] for e in out] == ["ISM"] and len(llm.calls) == 3
+    assert "ONLY the JSON array" in llm.calls[1]["prompt"] and "ONLY the JSON array" not in llm.calls[0]["prompt"]
+
+
+def test_research_gives_up_after_three_attempts_and_quotes_the_reply():
+    llm = ScriptedLLM("Sorry, no calendar today.")
+    with pytest.raises(ValueError, match="Sorry, no calendar"):
+        asyncio.run(news.research_news(llm, NOW))
+    assert len(llm.calls) == 3
+
+
+def test_failed_search_backs_off_instead_of_repeating_every_poll(scenario):
+    _, deps, _ = scenario
+    deps.news_loader = lambda: None
+    deps.llm, deps.llm_news = ScriptedLLM("no list here"), True
+    first = start(build_graph(deps))
+    calls_after_first = len(deps.llm.calls)
+    second = start(build_graph(deps))
+    assert first["outcome"] == second["outcome"] == "NEWS_UNCHECKED"
+    assert calls_after_first == 3 and len(deps.llm.calls) == 3                  # no new paid calls on the next poll
+    assert any("not retrying until" in r for r in second["reasons"])
+
+
+def test_news_recovers_after_the_backoff_and_a_good_reply(scenario):
+    _, deps, now = scenario
+    deps.news_loader = lambda: None
+    llm = ScriptedLLM("no list here")
+    deps.llm, deps.llm_news = llm, True
+    assert start(build_graph(deps))["outcome"] == "NEWS_UNCHECKED"
+    llm.replies = ["[]", "fine"]
+    deps.clock = lambda: now + dt.timedelta(minutes=11)
+    deps.broker.as_of = now + dt.timedelta(minutes=11)
+    res = start(build_graph(deps))
+    assert res.get("outcome") != "NEWS_UNCHECKED"
+    assert any("LLM news research:" in line and "failed" not in line for line in res["log"])

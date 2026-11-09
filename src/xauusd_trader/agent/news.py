@@ -27,7 +27,7 @@ def parse_events(text: str, now_ny: dt.datetime) -> List[dict]:
     """Extract and validate events from the model reply. Raises ValueError if no JSON array is found."""
     a, b = text.find("["), text.rfind("]")
     if a < 0 or b < a:
-        raise ValueError("no JSON array in reply")
+        raise ValueError("no JSON array in reply (starts: %r)" % text[:80])
     try:
         raw = json.loads(text[a:b + 1])
     except ValueError as e:
@@ -53,10 +53,22 @@ def parse_events(text: str, now_ny: dt.datetime) -> List[dict]:
     return out
 
 
-async def research_news(llm: LLM, now_ny: dt.datetime) -> List[dict]:
+RETRY_NOTE = (" Your previous reply was not a JSON array. Reply with ONLY the JSON array, starting with [ and ending "
+              "with ], nothing before or after it. Use [] if there are no events.")
+
+
+async def research_news(llm: LLM, now_ny: dt.datetime, attempts: int = 3) -> List[dict]:
+    """Ask for the calendar; the model occasionally answers in prose or with empty text after searching, so retry
+    with a stricter reminder before giving up. Raises the last ValueError if every attempt fails."""
     prompt = "Today is %s (New York time, %s). List the relevant US events from now through tomorrow morning." % (
         now_ny.strftime("%A %Y-%m-%d"), now_ny.strftime("%H:%M"))
-    return parse_events(await llm.complete(SYSTEM, prompt, web_search=True), now_ny)
+    err: Exception = ValueError("no attempts")
+    for i in range(attempts):
+        try:
+            return parse_events(await llm.complete(SYSTEM, prompt + (RETRY_NOTE if i else ""), web_search=True), now_ny)
+        except ValueError as e:
+            err = e
+    raise err
 
 
 def merge(file_events: List[dict], llm_events: List[dict]) -> Tuple[List[dict], int]:

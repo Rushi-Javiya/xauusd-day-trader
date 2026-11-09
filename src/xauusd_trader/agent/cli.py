@@ -46,7 +46,7 @@ def _log_outcome(res: dict) -> None:
 
 
 GOOD_EXIT = {"ORDER_PLACED", "NO_SIGNAL", "WAITING", "CONFLICT", "REJECTED"}
-RETRY_OUTCOMES = {"WAITING", "NO_SIGNAL", "CONFLICT", "STALE_DATA", "PRICE_MOVED"}
+RETRY_OUTCOMES = {"WAITING", "NO_SIGNAL", "CONFLICT", "STALE_DATA", "PRICE_MOVED", "NEWS_UNCHECKED"}
 TRANSIENT_BLOCKS = ("news blackout", "outside entry window")
 TRANSIENT_PREFLIGHT = ("tick time is", "bar_time_mode is")
 

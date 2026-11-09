@@ -147,7 +147,16 @@ def build_nodes(d: Deps) -> Dict[str, Callable]:
                 now = d.clock()
                 cache = d.extra.get("news_cache")      # watch mode: don't repeat paid searches every bar
                 fresh = cache is not None and now - cache["at"] < TD(minutes=60)
-                found = cache["events"] if fresh else await research_news(d.llm, now)
+                failed = d.extra.get("news_failed_at")
+                if not fresh and failed is not None and now - failed < TD(minutes=10):
+                    raise RuntimeError("last search failed at %s NY; not retrying until %s NY" % (
+                        failed.strftime("%H:%M"), (failed + TD(minutes=10)).strftime("%H:%M")))
+                try:
+                    found = cache["events"] if fresh else await research_news(d.llm, now)
+                except Exception:
+                    d.extra["news_failed_at"] = now          # back off: do not repeat paid searches every minute
+                    raise
+                d.extra.pop("news_failed_at", None)
                 if not fresh:
                     d.extra["news_cache"] = {"at": now, "events": found}
                 events, added = merge(events or [], found) if events is not None else (found, len(found))
