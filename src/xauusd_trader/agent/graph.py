@@ -6,10 +6,11 @@ preflight -> fetch_data -> compute_levels -> check_news -> find_entry -> make_pl
 Every node either advances or sets `outcome` (a terminal result) and the graph ends. Sizing, the risk
 gate and order authorization are deterministic code; the only human step is `interrupt()` in `approval`.
 Nothing before the interrupt has side effects, because LangGraph re-runs the node on resume."""
+import asyncio
 import operator
 import datetime as dt
 from dataclasses import dataclass, field
-from typing import Annotated, Any, Callable, Dict, List, Optional, Sequence, TypedDict
+from typing import Annotated, Any, Awaitable, Callable, Dict, List, Optional, Sequence, TypedDict
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
@@ -79,6 +80,9 @@ class Deps:
     llm_news: bool = False
     track_handled: Optional[bool] = None   # remember handled signals; default: on for real brokers, off for replays
     log_trades: bool = True
+    sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep
+    sync_tries: int = 7                    # a freshly started terminal serves stale, mis-stamped data for a while:
+    sync_wait_s: float = 10.0              # re-read the tick this often before giving up
     extra: dict = field(default_factory=dict)
 
 
@@ -95,6 +99,24 @@ def build_nodes(d: Deps) -> Dict[str, Callable]:
     track = (not broker.replay) if d.track_handled is None else d.track_handled
     tf = TD(minutes=cfg["tf_minutes"])
 
+    async def feed_problem():
+        """(problem or None, seconds waited). Compares the live tick stamp with the clock; retries while the
+        terminal is still syncing, because a just-launched MT5 answers first with data stamped hours off."""
+        waited = 0.0
+        for attempt in range(d.sync_tries):
+            tick = await broker.tick(sym)
+            mode, off = guard.detect_time_mode(tick["time"], ny_to_utc(d.clock()), cfg)
+            if mode == cfg["bar_time_mode"]:
+                return None, waited
+            if attempt < d.sync_tries - 1:
+                await d.sleep(d.sync_wait_s)
+                waited += d.sync_wait_s
+        if mode == "mismatch":
+            return ("tick time is %+.1fh from UTC, matching neither broker offsets nor UTC; "
+                    "fix broker_offset_* in config" % off), waited
+        return ("bar_time_mode is %r but the feed looks like %r; set bar_time_mode accordingly"
+                % (cfg["bar_time_mode"], mode)), waited
+
     async def preflight(state: TradeState):
         if not await broker.initialize():
             return _end("PREFLIGHT_FAILED", ["MT5 initialize failed; is the terminal open and logged in?"])
@@ -102,18 +124,16 @@ def build_nodes(d: Deps) -> Dict[str, Callable]:
         info = await broker.symbol_info(sym)
         problems = guard.check_account(acct) + guard.check_symbol(info, cfg)
         now = d.clock()
+        waited = 0.0
         if not broker.replay and not risk.market_closed(now):
-            tick = await broker.tick(sym)
-            mode, off = guard.detect_time_mode(tick["time"], ny_to_utc(now), cfg)
-            if mode == "mismatch":
-                problems.append("tick time is %+.1fh from UTC, matching neither broker offsets nor UTC; "
-                                "fix broker_offset_* in config" % off)
-            elif mode != cfg["bar_time_mode"]:
-                problems.append("bar_time_mode is %r but the feed looks like %r; set bar_time_mode accordingly"
-                                % (cfg["bar_time_mode"], mode))
+            problem, waited = await feed_problem()
+            if problem:
+                problems.append(problem)
         if problems:
             return _end("PREFLIGHT_FAILED", problems)
         notes = []
+        if waited:
+            notes.append("waited %ds for the MT5 terminal to sync its clock" % waited)
         bal = acct.get("balance")
         if bal and abs(float(bal) - cfg["account_balance"]) > 0.2 * cfg["account_balance"]:
             notes.append("note: account balance %.0f differs >20%% from config account_balance %.0f "
