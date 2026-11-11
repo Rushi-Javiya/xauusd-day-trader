@@ -27,6 +27,7 @@ gold-fetch = "xauusd_trader.fetch:main"
 gold-agent = "xauusd_trader.agent.cli:main"
 gold-review = "xauusd_trader.agent.cli:review_main"
 gold-tickets = "xauusd_trader.agent.audit:main"
+gold-doctor = "xauusd_trader.agent.doctor:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
