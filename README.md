@@ -100,6 +100,16 @@ gold-agent --broker paper --data gold/data/M5.json --now "2026-02-02 09:25" --se
 gold-agent --broker mcp                                                                    # real MT5, demo account
 ```
 
+### Troubleshooting
+
+Run `gold-doctor` first. It checks config, API key, MT5 connection, demo account and the feed clock without trading, and prints `[ OK ]`, `[WARN]` or `[FAIL]` for each.
+
+| You see | Cause | What to do |
+|---|---|---|
+| `bar_time_mode is 'server' but the feed looks like 'utc'` | A just-launched MT5 terminal serves cached data stamped hours off for a short time | The agent now waits up to about a minute for the terminal to sync; start MT5 yourself a minute earlier to skip the wait |
+| `NEWS_UNCHECKED` | No `gold/news.json` and the Claude search failed (bad key, or a reply without the JSON list) | The search retries 3 times and then backs off for 10 minutes; fix the key, or write `gold/news.json` yourself (`[]` only if there really are no events) |
+| `PREFLIGHT_FAILED ... demo` / `contract size` | Safety checks, deliberately not retried | Fix the account or config |
+
 ## Strategy (summary)
 
 | Setup | Idea |
